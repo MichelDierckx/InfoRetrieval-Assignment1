@@ -1,42 +1,66 @@
+"""
+Contains the Tokenizer class, which can be used to convert a text into a list of tokens.
+"""
+
+import os
+import string
 from typing import List
-from types import Token
+
 import nltk
+
+from src.types import Token
 
 
 class Tokenizer:
-
     def __init__(self):
-        pass
+        self.set_nltk_data_dir()  # Change directory where nltk looks for data to src/nltk_data
 
-    @staticmethod
-    def tokenize(text: str) -> List[Token]:
+    def set_nltk_data_dir(self):
         """
-        Inspired by https://spotintelligence.com/2022/12/21/nltk-preprocessing-pipeline/#14_Normalization
-        :param text:
-        :return:
+        Change directory where nltk looks for data to src/nltk_data
         """
-        # remove leading and trailing white space
+        # Construct the path to the src/nltk_data
+        nltk_data_dir = os.path.join(os.path.dirname(__file__), 'nltk_data')
+
+        # Create src/nltk_data if not exists
+        if not os.path.exists(nltk_data_dir):
+            os.makedirs(nltk_data_dir)
+            print(f"Created directory: {nltk_data_dir}")
+
+        # change directories where nltk will look to src/nltk_data
+        nltk.data.path = [nltk_data_dir]
+
+    def tokenize(self, text: str) -> List[Token]:
+        """
+        Tokenize the input text.
+        :param text: input text
+        :return: List of tokens
+        """
+        # Remove leading and trailing white space
         text = text.strip()
 
-        # replace multiple consecutive white space characters with a single space
+        # Replace multiple consecutive white space characters with a single space
         text = " ".join(text.split())
 
-        # tokenize the text
+        # Tokenize the text
         tokens = nltk.word_tokenize(text)
 
-        # lowercase the tokens
-        lowercased_tokens = [token.lower() for token in tokens]
+        # remove punctuation
+        tokens_without_punctuation = [token for token in tokens if token not in string.punctuation]
 
-        # get list of stopwords in English
+        # Lowercase the tokens
+        lowercased_tokens = [token.lower() for token in tokens_without_punctuation]
+
+        # Get list of stopwords in English
         stopwords = nltk.corpus.stopwords.words("english")
 
-        # remove stopwords
-        filtered_tokens = [token for token in lowercased_tokens if token not in stopwords]
+        # Remove stopwords
+        tokens_without_stopwords = [token for token in lowercased_tokens if token not in stopwords]
 
-        # create lemmatizer object
+        # Create lemmatizer object
         lemmatizer = nltk.stem.WordNetLemmatizer()
 
-        # lemmatize each token
-        lemmatized_tokens = [lemmatizer.lemmatize(token) for token in filtered_tokens]
+        # Lemmatize each token
+        lemmatized_tokens = [lemmatizer.lemmatize(token) for token in tokens_without_stopwords]
 
         return lemmatized_tokens

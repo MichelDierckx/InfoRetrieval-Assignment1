@@ -1,2 +1,5 @@
-# Define a Token as a type alias for string
+"""
+Define type aliases here
+"""
+
 Token = str
