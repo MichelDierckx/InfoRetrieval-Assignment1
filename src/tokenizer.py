@@ -22,11 +22,6 @@ class Tokenizer:
         # Construct the path to the src/nltk_data
         nltk_data_dir = os.path.join(os.path.dirname(__file__), 'nltk_data')
 
-        # Create src/nltk_data if not exists
-        if not os.path.exists(nltk_data_dir):
-            os.makedirs(nltk_data_dir)
-            print(f"Created directory: {nltk_data_dir}")
-
         # change directories where nltk will look to src/nltk_data
         nltk.data.path = [nltk_data_dir]
 
