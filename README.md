@@ -11,7 +11,7 @@ Install requirements via:
 pip install -r requirements.txt
 ```
 
-Download nltk datasets (otherwise tokenization will not work)
+Download nltk datasets (otherwise tokenization will not work). They will appear in **`src/nltk_data`**
 ```bash
 python3 src/nltk_data_download.py
 ```
