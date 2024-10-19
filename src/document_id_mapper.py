@@ -1,3 +1,7 @@
+"""
+Contains the DocumentIDMapper class. This class is used associate identifiers with filenames and vice versa.
+"""
+
 import os
 from typing import Dict
 
