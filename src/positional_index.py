@@ -2,13 +2,12 @@
 Contains the InvertedIndex class
 """
 import json
+import os
 from typing import Dict, List
 
 from src.custom_types import Term
 from src.document_id_mapper import DocumentIDMapper
 from src.tokenizer import Tokenizer
-
-FULL_DOCS_SMALL = "data/documents/full_docs_small"
 
 
 class Postings:
@@ -86,21 +85,37 @@ class PositionalIndex:
         """
         Save the positional index to a file (JSON).
         """
-        print(f'Saving positional index to {filename}')
-        with open(filename, 'w') as outfile:
-            json.dump(self.to_dict(), outfile, indent=4)
-        print(f'Successfully saved positional index to {filename}')
+        try:
+            print(f'Saving positional index to {filename}')
+            with open(filename, 'w') as outfile:
+                json.dump(self.to_dict(), outfile, indent=4)
+            print(f'Successfully saved positional index to {filename}')
+        except FileNotFoundError:
+            print(f"Error: The directory for '{filename}' does not exist.")
+        except Exception as e:
+            print(f"An error occurred while saving: {e}")
 
     @staticmethod
     def load_from_file(filename: str):
         """
         Load the positional index from a file (JSON).
         """
-        print(f'Loading positional index from {filename}')
-        with open(filename, 'r') as f:
-            data = json.load(f)
-        print(f'Successfully loaded positional index from {filename}')
-        return PositionalIndex.from_dict(data)
+        if not os.path.exists(filename):
+            print(f"Error: The file '{filename}' does not exist.")
+            return None
+
+        try:
+            print(f'Loading positional index from {filename}')
+            with open(filename, 'r') as f:
+                data = json.load(f)
+            print(f'Successfully loaded positional index from {filename}')
+            return PositionalIndex.from_dict(data)
+        except FileNotFoundError:
+            print(f"Error: The file '{filename}' was not found.")
+        except json.JSONDecodeError:
+            print(f"Error: The file '{filename}' contains invalid JSON.")
+        except Exception as e:
+            print(f"An error occurred while loading: {e}")
 
     def pretty_print(self) -> None:
         """
