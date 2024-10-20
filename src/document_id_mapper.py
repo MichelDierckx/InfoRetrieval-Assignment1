@@ -54,3 +54,24 @@ class DocumentIDMapper:
         Retrieves the filename for a given ID.
         """
         return self.id_to_document.get(file_id)
+
+    def to_dict(self) -> Dict:
+        """
+        Convert DocumentIDMapper to a dictionary.
+        """
+        return {
+            'document_to_id': self.document_to_id,
+            'id_to_document': self.id_to_document,
+            'directory': self.directory
+        }
+
+    @staticmethod
+    def from_dict(data: Dict):
+        """
+        Create a DocumentIDMapper from a dictionary.
+        """
+        document_id_mapper = DocumentIDMapper()
+        document_id_mapper.document_to_id = data['document_to_id']
+        document_id_mapper.id_to_document = data['id_to_document']
+        document_id_mapper.directory = data['directory']
+        return document_id_mapper
