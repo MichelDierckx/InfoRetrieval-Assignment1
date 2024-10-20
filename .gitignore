@@ -2,3 +2,4 @@
 .idea
 data/documents/
 data/queries/
+src/nltk_data/
