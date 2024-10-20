@@ -64,7 +64,7 @@ class PositionalIndex:
 
     def to_dict(self) -> Dict:
         """
-        Convert the PositionalIndex to a dictionary for JSON serialization.
+        Convert the PositionalIndex to a dictionary.
         """
         return {
             'positional_index': {term: postings.to_dict() for term, postings in self.positional_index.items()},
@@ -86,16 +86,20 @@ class PositionalIndex:
         """
         Save the positional index to a file (JSON).
         """
+        print(f'Saving positional index to {filename}')
         with open(filename, 'w') as outfile:
             json.dump(self.to_dict(), outfile, indent=4)
+        print(f'Successfully saved positional index to {filename}')
 
     @staticmethod
     def load_from_file(filename: str):
         """
         Load the positional index from a file (JSON).
         """
+        print(f'Loading positional index from {filename}')
         with open(filename, 'r') as f:
             data = json.load(f)
+        print(f'Successfully loaded positional index from {filename}')
         return PositionalIndex.from_dict(data)
 
     def pretty_print(self) -> None:
