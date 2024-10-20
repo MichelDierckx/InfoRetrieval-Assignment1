@@ -3,7 +3,7 @@ Run this python program to download NLTK datasets
 """
 
 import os
-
+import ssl
 import nltk
 
 
@@ -27,6 +27,13 @@ def download_nltk_resources():
     """
     Download the necessary NLTK resources to src/nltk_data
     """
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+
     print(f"Downloading to: {nltk.data.path[0]}")
     try:
         nltk.download('punkt_tab', download_dir=nltk.data.path[0])
