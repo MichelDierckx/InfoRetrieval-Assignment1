@@ -3,11 +3,12 @@ Contains the InvertedIndex class
 """
 import json
 import os
+import pickle
 from typing import Dict, List
 
-from src.custom_types import Term
-from src.document_id_mapper import DocumentIDMapper
-from src.tokenizer import Tokenizer
+from custom_types import Term
+from document_id_mapper import DocumentIDMapper
+from tokenizer import Tokenizer
 
 
 class Postings:
@@ -40,6 +41,12 @@ class Postings:
         postings.df = data['df']
         postings.postings_list = data['postings_list']
         return postings
+
+    def pretty_print(self) -> None:
+        """
+        Pretty print the Postings
+        """
+        print(json.dumps(self.to_dict(), indent=4))
 
 
 class PositionalIndex:
@@ -83,12 +90,12 @@ class PositionalIndex:
 
     def save_to_file(self, filename: str) -> None:
         """
-        Save the positional index to a file (JSON).
+        Save the positional index to a file (binary using pickle).
         """
         try:
             print(f'Saving positional index to {filename}')
-            with open(filename, 'w') as outfile:
-                json.dump(self.to_dict(), outfile, indent=4)
+            with open(filename, 'wb') as outfile:
+                pickle.dump(self.to_dict(), outfile)
             print(f'Successfully saved positional index to {filename}')
         except FileNotFoundError:
             print(f"Error: The directory for '{filename}' does not exist.")
@@ -98,7 +105,7 @@ class PositionalIndex:
     @staticmethod
     def load_from_file(filename: str):
         """
-        Load the positional index from a file (JSON).
+        Load the positional index from a file (binary using pickle).
         """
         if not os.path.exists(filename):
             print(f"Error: The file '{filename}' does not exist.")
@@ -106,14 +113,14 @@ class PositionalIndex:
 
         try:
             print(f'Loading positional index from {filename}')
-            with open(filename, 'r') as f:
-                data = json.load(f)
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
             print(f'Successfully loaded positional index from {filename}')
             return PositionalIndex.from_dict(data)
         except FileNotFoundError:
             print(f"Error: The file '{filename}' was not found.")
-        except json.JSONDecodeError:
-            print(f"Error: The file '{filename}' contains invalid JSON.")
+        except pickle.UnpicklingError:
+            print(f"Error: The file '{filename}' contains invalid pickle data.")
         except Exception as e:
             print(f"An error occurred while loading: {e}")
 
@@ -122,3 +129,6 @@ class PositionalIndex:
         Pretty print the positional index.
         """
         print(json.dumps(self.to_dict(), indent=4))
+
+    def get_terms(self) -> List[Term]:
+        return list(self.positional_index.keys())

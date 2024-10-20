@@ -8,7 +8,7 @@ from typing import List
 
 import nltk
 
-from src.custom_types import Token
+from custom_types import Token
 
 
 class Tokenizer:
