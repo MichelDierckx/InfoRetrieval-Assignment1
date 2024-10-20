@@ -24,12 +24,14 @@ class Postings:
 
 
 class PositionalIndex:
-    def __init__(self, directory):
+    def __init__(self):
         self.positional_index: Dict[Term, Postings] = {}
-        self.document_id_mapper = DocumentIDMapper(directory)
+        self.document_id_mapper = DocumentIDMapper()
 
-    def create(self):
+    def create_from_directory(self, directory: str):
+        print(f'Creating a positional index for the specified directory: {directory}')
         tokenizer = Tokenizer()
+        self.document_id_mapper.create_from_directory(directory)
         for document_name, document_id in self.document_id_mapper.document_to_id.items():
             with open(f'{self.document_id_mapper.directory}/{document_name}', 'r') as f:
                 document = f.read()
@@ -38,3 +40,4 @@ class PositionalIndex:
                 if term not in self.positional_index:
                     self.positional_index[term] = Postings()
                 self.positional_index[term].update(document_id, term_position)
+        print('Successfully created positional index.')

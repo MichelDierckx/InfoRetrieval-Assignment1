@@ -9,22 +9,22 @@ from natsort import natsorted
 
 
 class DocumentIDMapper:
-    def __init__(self, directory: str):
+    def __init__(self):
         """
         Initializes the DocumentIDMapper
-        :param directory: A directory containing documents.
         """
-        self.directory = directory
         self.document_to_id: Dict[str, int] = {}  # (filename, id)
         self.id_to_document: Dict[int, str] = {}  # (id, filename)
-        self.setup()
+        self.directory = ""
 
-    def setup(self):
+    def create_from_directory(self, directory: str) -> None:
         """
         Constructs two dictionaries:
         1. Mapping from filenames to unique IDs.
         2. Mapping from unique IDs to filenames.
+        Also saves the associated directory path.
         """
+        print(f'Create mapping from document names in {directory} to unique IDs.')
         try:
             # list all textfiles in directory (sorted alphabetically)
             files = natsorted(os.listdir(self.directory))
@@ -37,6 +37,7 @@ class DocumentIDMapper:
             for index, text_file in enumerate(documents, start=1):
                 self.document_to_id[text_file] = index  # Map filename to ID
                 self.id_to_document[index] = text_file  # Map ID to filename
+            self.directory = directory
         except FileNotFoundError:
             print(f"Could not find directory '{self.directory}'.")
         except Exception as e:
