@@ -1,9 +1,14 @@
-from positional_index import PositionalIndex
+import cProfile
+import io
+import pstats
+
+from positional_index import SPIMIIndexer
 
 FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
 FULL_DOCS_DIRECTORY = "data/documents/full_docs"
-FULL_DOCS_SMALL_INDEX = "data/saved_indexes/full_docs_small.json"
-FULL_DOCS_INDEX = "data/saved_indexes/full_docs.json"
+FULL_DOCS_SMALL_INDEX_DIRECTORY = "data/saved_indexes/full_docs_small"
+FULL_DOCS_INDEX_DIRECTORY = "data/saved_indexes/full_docs"
+MEMORY_LIMIT = 2000
 
 DEV = True
 
@@ -12,19 +17,33 @@ def main():
     """ Main program """
     if DEV:
         documents_dir = FULL_DOCS_SMALL_DIRECTORY
-        index_file = FULL_DOCS_SMALL_INDEX
+        index_dir = FULL_DOCS_SMALL_INDEX_DIRECTORY
     else:
         documents_dir = FULL_DOCS_DIRECTORY
-        index_file = FULL_DOCS_INDEX
+        index_dir = FULL_DOCS_INDEX_DIRECTORY
 
-    # Code goes over here.
-    positional_index = PositionalIndex()
-    positional_index.create_from_directory(documents_dir)
-    positional_index.save_to_file(index_file)
-    positional_index.load_from_file(index_file)
+    # Create a StringIO buffer to capture the profiling results
+    profile_buffer = io.StringIO()
+    profiler = cProfile.Profile()
 
-    positional_index.get_postings_list("tolerate").pretty_print()
-    # print(positional_index.get_terms())
+    # Start profiling
+    profiler.enable()
+
+    spimi_indexer = SPIMIIndexer(index_dir)
+
+    final_index = spimi_indexer.create_index_from_directory(documents_dir, MEMORY_LIMIT)
+
+    tolerate = final_index.get("tolerate")  # Use .get() to avoid KeyError if not found
+    if tolerate:
+        tolerate.pretty_print()
+
+    # Stop profiling
+    profiler.disable()
+
+    # Print profiling results (only from module src)
+    pstats.Stats(profiler, stream=profile_buffer).sort_stats('cumulative').print_stats("src")
+    print(profile_buffer.getvalue())
+
     return 0
 
 
