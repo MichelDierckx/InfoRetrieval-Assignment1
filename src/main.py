@@ -10,8 +10,9 @@ def main():
     positional_index = PositionalIndex()
     positional_index.create_from_directory(FULL_DOCS_SMALL_DIRECTORY)
     positional_index.save_to_file(FULL_DOCS_SMALL_INDEX)
-    # positional_index.load_from_file(FULL_DOCS_SMALL_INDEX)
+    positional_index.load_from_file(FULL_DOCS_SMALL_INDEX)
 
+    positional_index.get_postings_list("tolerate").pretty_print()
     # print(positional_index.get_terms())
     return 0
 

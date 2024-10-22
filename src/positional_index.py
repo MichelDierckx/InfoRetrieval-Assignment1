@@ -4,54 +4,95 @@ Contains the InvertedIndex class
 import json
 import os
 import pickle
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from custom_types import Term
 from document_id_mapper import DocumentIDMapper
 from tokenizer import Tokenizer
 
 
-class Postings:
+class Posting:
+    def __init__(self):
+        self.tf = 0  # Term frequency
+        self.positions: List[int] = []  # List of positions in the document
+
+    def update(self, term_position: int) -> None:
+        """
+        Update the Posting by adding a new position and incrementing the term frequency.
+        """
+        self.positions.append(term_position)
+        self.tf += 1
+
+    def to_list(self) -> List:
+        """
+        Convert Posting object to a List[tf, List[position]]
+        """
+        return [self.tf, self.positions]
+
+    @staticmethod
+    def from_list(data: List):
+        """
+        Create a Posting object from a List[tf, List[position]].
+        """
+        posting = Posting()
+        posting.tf = data[0]
+        posting.positions = data[1]
+        return posting
+
+    def pretty_print(self) -> None:
+        """
+        Pretty print the Posting
+        """
+        print(self.to_list())
+
+
+class PostingsList:
     def __init__(self):
         self.df = 0
-        self.postings_list: Dict[int, List[int]] = {}
+        self.postings: Dict[int, Posting] = {}
 
     def update(self, document_id: int, term_position: int):
-        if document_id in self.postings_list:
-            self.postings_list[document_id].append(term_position)
+        if document_id in self.postings:
+            self.postings[document_id].update(term_position)
         else:
-            self.postings_list[document_id] = [term_position]
+            self.postings[document_id] = Posting()
+            self.postings[document_id].update(term_position)
             self.df += 1
 
     def to_dict(self) -> Dict:
         """
-        Convert Postings object to a dictionary.
+        Convert PostingsList object to a dictionary.
         """
         return {
             'df': self.df,
-            'postings_list': self.postings_list
+            'postings': {doc_id: posting.to_list() for doc_id, posting in self.postings.items()}
         }
 
     @staticmethod
     def from_dict(data: Dict):
         """
-        Create a Postings object from a dictionary.
+        Create a PostingsList object from a dictionary.
         """
-        postings = Postings()
-        postings.df = data['df']
-        postings.postings_list = data['postings_list']
-        return postings
+        postings_list = PostingsList()
+        postings_list.df = data['df']
+        postings_list.postings = {
+            int(doc_id): Posting.from_list(posting) for doc_id, posting in data['postings'].items()
+        }
+        return postings_list
 
     def pretty_print(self) -> None:
         """
-        Pretty print the Postings
+        Pretty print the PostingsList
         """
         print(json.dumps(self.to_dict(), indent=4))
+
+    def get_posting(self, document_id: int) -> Optional[Posting]:
+        return self.postings.get(document_id)
 
 
 class PositionalIndex:
     def __init__(self):
-        self.positional_index: Dict[Term, Postings] = {}
+        self.positional_index: Dict[Term, PostingsList] = {}
         self.document_id_mapper = DocumentIDMapper()
 
     def create_from_directory(self, directory: str):
@@ -64,7 +105,7 @@ class PositionalIndex:
             tokens = tokenizer.tokenize(document)
             for term_position, term in enumerate(tokens, start=1):
                 if term not in self.positional_index:
-                    self.positional_index[term] = Postings()
+                    self.positional_index[term] = PostingsList()
                 self.positional_index[term].update(document_id, term_position)
         print('Successfully created positional index.')
 
@@ -83,7 +124,7 @@ class PositionalIndex:
         Create a PositionalIndex from a dictionary.
         """
         positional_index = PositionalIndex()
-        positional_index.positional_index = {term: Postings.from_dict(postings_data)
+        positional_index.positional_index = {term: PostingsList.from_dict(postings_data)
                                              for term, postings_data in data['positional_index'].items()}
         positional_index.document_id_mapper = DocumentIDMapper.from_dict(data['document_id_mapper'])
         return positional_index
@@ -132,3 +173,6 @@ class PositionalIndex:
 
     def get_terms(self) -> List[Term]:
         return list(self.positional_index.keys())
+
+    def get_postings_list(self, term: Term) -> Optional[PostingsList]:
+        return self.positional_index.get(term)
