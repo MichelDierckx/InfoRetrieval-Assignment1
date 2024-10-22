@@ -5,6 +5,7 @@ import json
 import math
 import os
 import pickle
+from collections import defaultdict
 from typing import Dict, List, Optional
 
 from custom_types import Term, DocID
@@ -56,14 +57,11 @@ class Posting:
 class PostingsList:
     def __init__(self):
         self.df = 0
-        self.postings: Dict[DocID, Posting] = {}
+        self.postings: Dict[DocID, Posting] = defaultdict(Posting)
 
     def update(self, document_id: DocID, term_position: int):
-        if document_id in self.postings:
-            self.postings[document_id].update(term_position)
-        else:
-            self.postings[document_id] = Posting()
-            self.postings[document_id].update(term_position)
+        self.postings[document_id].update(term_position)
+        if self.postings[document_id].tf == 1:  # New doc
             self.df += 1
 
     def calculate_tfidf(self, total_docs: int) -> None:
@@ -103,7 +101,7 @@ class PostingsList:
 
 class PositionalIndex:
     def __init__(self):
-        self.positional_index: Dict[Term, PostingsList] = {}
+        self.positional_index: Dict[Term, PostingsList] = defaultdict(PostingsList)
         self.document_id_mapper = DocumentIDMapper()
 
     def create_from_directory(self, directory: str):
@@ -117,13 +115,13 @@ class PositionalIndex:
         for count, (document_name, document_id) in enumerate(self.document_id_mapper.document_to_id.items(), start=1):
             with open(f'{self.document_id_mapper.directory}/{document_name}', 'r') as f:
                 document = f.read()
+
             tokens = tokenizer.tokenize(document)
+
             for term_position, term in enumerate(tokens, start=1):
-                if term not in self.positional_index:
-                    self.positional_index[term] = PostingsList()
                 self.positional_index[term].update(document_id, term_position)
 
-            # Print progress update every 1000 documents
+            # Print progress update every 10,000 documents
             if count % 10000 == 0 or count == total_documents:
                 print(f'Processed {count}/{total_documents} documents.')
 
