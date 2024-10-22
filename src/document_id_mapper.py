@@ -13,9 +13,10 @@ class DocumentIDMapper:
         """
         Initializes the DocumentIDMapper
         """
+        self.directory = ""
+        self.total_docs = 0
         self.document_to_id: Dict[str, int] = {}  # (filename, id)
         self.id_to_document: Dict[int, str] = {}  # (id, filename)
-        self.directory = ""
 
     def create_from_directory(self, directory: str) -> None:
         """
@@ -40,6 +41,7 @@ class DocumentIDMapper:
             for index, text_file in enumerate(documents, start=1):
                 self.document_to_id[text_file] = index  # Map filename to ID
                 self.id_to_document[index] = text_file  # Map ID to filename
+                self.total_docs += 1
 
             # Save the directory path
             self.directory = directory
@@ -62,14 +64,18 @@ class DocumentIDMapper:
         """
         return self.id_to_document.get(file_id)
 
+    def get_total_docs(self):
+        return self.total_docs
+
     def to_dict(self) -> Dict:
         """
         Convert DocumentIDMapper to a dictionary.
         """
         return {
+            'directory': self.directory,
+            'total_docs': self.total_docs,
             'document_to_id': self.document_to_id,
-            'id_to_document': self.id_to_document,
-            'directory': self.directory
+            'id_to_document': self.id_to_document
         }
 
     @staticmethod
@@ -78,9 +84,10 @@ class DocumentIDMapper:
         Create a DocumentIDMapper from a dictionary.
         """
         document_id_mapper = DocumentIDMapper()
+        document_id_mapper.directory = data['directory']
+        document_id_mapper.directory = data['total_docs']
         document_id_mapper.document_to_id = data['document_to_id']
         document_id_mapper.id_to_document = data['id_to_document']
-        document_id_mapper.directory = data['directory']
         return document_id_mapper
 
     def pretty_print(self) -> None:
