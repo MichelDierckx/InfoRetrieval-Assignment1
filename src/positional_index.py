@@ -2,18 +2,21 @@
 Contains the InvertedIndex class
 """
 import json
+import math
 import os
 import pickle
 from typing import Dict, List, Optional
 
-from custom_types import Term
+from custom_types import Term, DocID
 from document_id_mapper import DocumentIDMapper
+from tf_idf import calculate_tf_idf_weight
 from tokenizer import Tokenizer
 
 
 class Posting:
     def __init__(self):
         self.tf = 0  # Term frequency
+        self.tfidf = 0.0  # normalized TF-IDF
         self.positions: List[int] = []  # List of positions in the document
 
     def update(self, term_position: int) -> None:
@@ -23,20 +26,24 @@ class Posting:
         self.positions.append(term_position)
         self.tf += 1
 
+    def calculate_tfidf(self, total_docs: int, df: int) -> None:
+        self.tfidf = calculate_tf_idf_weight(self.tf, total_docs, df)
+
     def to_list(self) -> List:
         """
-        Convert Posting object to a List[tf, List[position]]
+        Convert Posting object to a List[tf, tfidf, List[position]]
         """
-        return [self.tf, self.positions]
+        return [self.tf, self.tfidf, self.positions]
 
     @staticmethod
     def from_list(data: List):
         """
-        Create a Posting object from a List[tf, List[position]].
+        Create a Posting object from a List[tf, tfidf, List[position]].
         """
         posting = Posting()
         posting.tf = data[0]
-        posting.positions = data[1]
+        posting.tfidf = data[1]
+        posting.positions = data[2]
         return posting
 
     def pretty_print(self) -> None:
@@ -49,15 +56,19 @@ class Posting:
 class PostingsList:
     def __init__(self):
         self.df = 0
-        self.postings: Dict[int, Posting] = {}
+        self.postings: Dict[DocID, Posting] = {}
 
-    def update(self, document_id: int, term_position: int):
+    def update(self, document_id: DocID, term_position: int):
         if document_id in self.postings:
             self.postings[document_id].update(term_position)
         else:
             self.postings[document_id] = Posting()
             self.postings[document_id].update(term_position)
             self.df += 1
+
+    def calculate_tfidf(self, total_docs: int) -> None:
+        for posting in self.postings.values():
+            posting.calculate_tfidf(total_docs, self.df)
 
     def to_dict(self) -> Dict:
         """
@@ -86,7 +97,7 @@ class PostingsList:
         """
         print(json.dumps(self.to_dict(), indent=4))
 
-    def get_posting(self, document_id: int) -> Optional[Posting]:
+    def get_posting(self, document_id: DocID) -> Optional[Posting]:
         return self.postings.get(document_id)
 
 
@@ -108,6 +119,35 @@ class PositionalIndex:
                     self.positional_index[term] = PostingsList()
                 self.positional_index[term].update(document_id, term_position)
         print('Successfully created positional index.')
+        self.calculate_tfidf_normalized()
+        print('Successfully added normalized tf-idf weights to positional index.')
+
+    def calculate_tfidf_normalized(self) -> None:
+        total_docs = self.document_id_mapper.total_docs
+        print('Calculating tf-idf weights...')
+        for postings_list in self.positional_index.values():
+            postings_list.calculate_tfidf(total_docs)
+        print('Normalizing tf-idf weights...')
+        self.normalize_tfidf()
+
+    def get_doc_lengths(self) -> Dict[DocID, float]:
+        doc_lengths: Dict[DocID, float] = {}
+
+        for postings_list in self.positional_index.values():
+            for document_id, posting in postings_list.postings.items():
+                doc_lengths.setdefault(document_id, 0)  # if not present, first init to zero
+                doc_lengths[document_id] += posting.tfidf ** 2
+
+        for document_id, doc_length in doc_lengths.items():
+            doc_lengths[document_id] = math.sqrt(doc_length)
+
+        return doc_lengths
+
+    def normalize_tfidf(self):
+        doc_lengths = self.get_doc_lengths()
+        for postings_list in self.positional_index.values():
+            for document_id, posting in postings_list.postings.items():
+                posting.tfidf = posting.tfidf / doc_lengths[document_id]
 
     def to_dict(self) -> Dict:
         """

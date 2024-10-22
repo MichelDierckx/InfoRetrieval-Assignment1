@@ -7,6 +7,8 @@ from typing import Dict
 
 from natsort import natsorted
 
+from custom_types import DocID
+
 
 class DocumentIDMapper:
     def __init__(self):
@@ -15,8 +17,8 @@ class DocumentIDMapper:
         """
         self.directory = ""
         self.total_docs = 0
-        self.document_to_id: Dict[str, int] = {}  # (filename, id)
-        self.id_to_document: Dict[int, str] = {}  # (id, filename)
+        self.document_to_id: Dict[str, DocID] = {}  # (filename, id)
+        self.id_to_document: Dict[DocID, str] = {}  # (id, filename)
 
     def create_from_directory(self, directory: str) -> None:
         """
@@ -58,11 +60,11 @@ class DocumentIDMapper:
         """
         return self.document_to_id.get(document_name)
 
-    def get_filename(self, file_id: int) -> str:
+    def get_filename(self, document_id: DocID) -> str:
         """
         Retrieves the filename for a given ID.
         """
-        return self.id_to_document.get(file_id)
+        return self.id_to_document.get(document_id)
 
     def get_total_docs(self):
         return self.total_docs
