@@ -110,7 +110,11 @@ class PositionalIndex:
         print(f'Creating a positional index for the specified directory: {directory}')
         tokenizer = Tokenizer()
         self.document_id_mapper.create_from_directory(directory)
-        for document_name, document_id in self.document_id_mapper.document_to_id.items():
+
+        total_documents = self.document_id_mapper.total_docs
+        print(f'Total documents to process: {total_documents}')
+
+        for count, (document_name, document_id) in enumerate(self.document_id_mapper.document_to_id.items(), start=1):
             with open(f'{self.document_id_mapper.directory}/{document_name}', 'r') as f:
                 document = f.read()
             tokens = tokenizer.tokenize(document)
@@ -118,6 +122,11 @@ class PositionalIndex:
                 if term not in self.positional_index:
                     self.positional_index[term] = PostingsList()
                 self.positional_index[term].update(document_id, term_position)
+
+            # Print progress update every 1000 documents
+            if count % 10000 == 0 or count == total_documents:
+                print(f'Processed {count}/{total_documents} documents.')
+
         print('Successfully created positional index.')
         self.calculate_tfidf_normalized()
         print('Successfully added normalized tf-idf weights to positional index.')
