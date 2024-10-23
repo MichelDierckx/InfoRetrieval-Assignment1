@@ -8,7 +8,7 @@ FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
 FULL_DOCS_DIRECTORY = "data/documents/full_docs"
 FULL_DOCS_SMALL_INDEX_DIRECTORY = "data/saved_indexes/full_docs_small"
 FULL_DOCS_INDEX_DIRECTORY = "data/saved_indexes/full_docs"
-MEMORY_LIMIT = 2000
+MEMORY_LIMIT = 10000
 
 DEV = True
 

@@ -88,6 +88,21 @@ class PostingsList:
         }
         return postings_list
 
+    def to_list(self) -> List:
+        return [
+            self.df,  # first element is df
+            {doc_id: posting.to_list() for doc_id, posting in self.postings.items()}
+        ]
+
+    @staticmethod
+    def from_list(data: List):
+        postings_list = PostingsList()
+        postings_list.df = data[0]  # first element is df
+        postings_list.postings = {
+            int(doc_id): Posting.from_list(posting) for doc_id, posting in data[1].items()
+        }
+        return postings_list
+
     def pretty_print(self) -> None:
         """
         Pretty print the PostingsList
@@ -129,7 +144,7 @@ class SPIMIIndexer:
         filename = f"{self.index_directory}/partial_index_{self.partial_index_count}.pickle"
         self.partial_index_count += 1
         with open(filename, 'wb') as f:
-            pickle.dump({term: postings.to_dict() for term, postings in partial_index.items()}, f)
+            pickle.dump({term: postings.to_list() for term, postings in partial_index.items()}, f)
         return filename
 
     def merge_partial_indexes(self, partial_index_files: List[str]) -> Dict[Term, PostingsList]:
@@ -142,7 +157,7 @@ class SPIMIIndexer:
             with open(filename, 'rb') as f:
                 partial_index = pickle.load(f)
                 for term, postings_data in partial_index.items():
-                    postings_list = PostingsList.from_dict(postings_data)
+                    postings_list = PostingsList.from_list(postings_data)
                     if term not in final_index:
                         final_index[term] = postings_list
                     else:
@@ -150,8 +165,6 @@ class SPIMIIndexer:
                             # Update posting in final_index with all term positions from the posting in the partial index
                             for position in posting.positions:
                                 final_index[term].update(doc_id, position)
-                        # Increment document frequency with document frequency mentioned in partial index
-                        final_index[term].df += postings_list.df
         return final_index
 
     def save_final_index(self, final_index: Dict[Term, PostingsList], filename: str = 'final_index.pickle') -> None:
@@ -160,7 +173,7 @@ class SPIMIIndexer:
         """
         filepath = f"{self.index_directory}/{filename}"
         with open(filepath, 'wb') as f:
-            pickle.dump({term: postings.to_dict() for term, postings in final_index.items()}, f)
+            pickle.dump({term: postings.to_list() for term, postings in final_index.items()}, f)
         print(f'Final index saved to {filepath}')
 
     def create_index_from_directory(self, directory: str, memory_limit: int = 2000) -> Dict[Term, PostingsList]:
