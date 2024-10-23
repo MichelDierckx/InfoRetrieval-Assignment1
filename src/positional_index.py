@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import time
 from collections import defaultdict
 from typing import Dict, List
 
@@ -153,6 +154,10 @@ class SPIMIIndexer:
         """
         final_index = defaultdict(PostingsList)
 
+        # Start the timer for the merge process
+        start_time = time.time()
+        total_merges = 0  # Counter for the number of merges
+
         for filename in partial_index_files:
             with open(filename, 'rb') as f:
                 partial_index = pickle.load(f)
@@ -165,6 +170,14 @@ class SPIMIIndexer:
                             # Update posting in final_index with all term positions from the posting in the partial index
                             for position in posting.positions:
                                 final_index[term].update(doc_id, position)
+
+                    total_merges += 1  # Increment merge counter
+
+                    # Print status update every 5000 merges
+                    if total_merges % 5000 == 0:
+                        elapsed_time = time.time() - start_time  # Calculate elapsed time
+                        print(f"Merged {total_merges} postings... Total elapsed time: {elapsed_time:.2f} seconds")
+
         return final_index
 
     def save_final_index(self, final_index: Dict[Term, PostingsList], filename: str = 'final_index.pickle') -> None:
@@ -190,6 +203,10 @@ class SPIMIIndexer:
         document_batch = []
         document_id_batch = []
         batch_size = 0
+        total_docs_processed = 0
+
+        # Start the timer
+        start_time = time.time()
 
         # Process documents in chunks based on memory limit
         for count, (document_name, document_id) in enumerate(self.document_id_mapper.document_to_id.items(), start=1):
@@ -199,14 +216,22 @@ class SPIMIIndexer:
                 document_id_batch.append(document_id)
                 batch_size += len(document)  # Approximate memory usage by document text length
 
-            # batch gets processed when memory limit is reached
+            # Batch gets processed when memory limit is reached or the last document is processed
             if batch_size >= memory_limit or count == total_documents:
-                print(f'Processing batch of {len(document_batch)} documents...')
                 partial_index = self.create_partial_index(document_batch, document_id_batch)
                 partial_index_file = self.save_partial_index(partial_index)
                 partial_index_files.append(partial_index_file)
 
-                # clear the batch
+                # Increment total documents processed
+                total_docs_processed += len(document_batch)
+
+                # Progress report every 10,000 documents processed
+                if total_docs_processed % 10000 < len(document_batch):
+                    elapsed_time = time.time() - start_time  # Calculate total elapsed time
+                    print(f"Processed {total_docs_processed} / {total_documents} documents... "
+                          f"Total elapsed time: {elapsed_time:.2f} seconds")
+
+                # Clear the batch
                 document_batch = []
                 document_id_batch = []
                 batch_size = 0
@@ -215,10 +240,10 @@ class SPIMIIndexer:
         final_index = self.merge_partial_indexes(partial_index_files)
         print('Index creation complete.')
 
-        # save final index
+        # Save final index
         self.save_final_index(final_index, 'final_index.pickle')
 
-        # remove partial indexes
+        # Remove partial indexes
         for filename in partial_index_files:
             os.remove(filename)
 
