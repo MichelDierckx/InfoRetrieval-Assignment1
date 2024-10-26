@@ -8,8 +8,11 @@ FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
 FULL_DOCS_DIRECTORY = "data/documents/full_docs"
 FULL_DOCS_SMALL_INDEX_DIRECTORY = "data/saved_indexes/full_docs_small"
 FULL_DOCS_INDEX_DIRECTORY = "data/saved_indexes/full_docs"
-MEMORY_LIMIT = 10000
+FULL_DOCS_SMALL_TOKENIZED_DOCUMENTS_DIRECTORY = "data/tokenized_documents/full_docs_small"
+FULL_DOCS_TOKENIZED_DOCUMENTS_DIRECTORY = "data/tokenized_documents/full_docs"
 
+MEMORY_LIMIT = 10000
+SAVE_TOKENIZED_DOCUMENTS = False
 DEV = True
 
 
@@ -18,9 +21,11 @@ def main():
     if DEV:
         documents_dir = FULL_DOCS_SMALL_DIRECTORY
         index_dir = FULL_DOCS_SMALL_INDEX_DIRECTORY
+        token_cache_dir = FULL_DOCS_SMALL_TOKENIZED_DOCUMENTS_DIRECTORY
     else:
         documents_dir = FULL_DOCS_DIRECTORY
         index_dir = FULL_DOCS_INDEX_DIRECTORY
+        token_cache_dir = FULL_DOCS_TOKENIZED_DOCUMENTS_DIRECTORY
 
     # Create a StringIO buffer to capture the profiling results
     profile_buffer = io.StringIO()
@@ -29,7 +34,7 @@ def main():
     # Start profiling
     profiler.enable()
 
-    spimi_indexer = SPIMIIndexer(index_dir)
+    spimi_indexer = SPIMIIndexer(index_dir, SAVE_TOKENIZED_DOCUMENTS, token_cache_dir)
 
     final_index = spimi_indexer.create_index_from_directory(documents_dir, MEMORY_LIMIT)
 

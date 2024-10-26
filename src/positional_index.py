@@ -196,77 +196,75 @@ class PositionalIndex:
 
 
 class SPIMIIndexer:
-    def __init__(self, index_directory: str = 'saved_index_full_docs_small'):
+    def __init__(self, index_directory: str = 'saved_index_full_docs_small',
+                 save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
         """
-        Creates an SPIMIIndexer object. The parameter index_directory specifies the directory the SPIMIIndexer will load indexes from and save indexes to.
+        Initializes the SPIMIIndexer object with directories for index files and token caches.
         """
         self.document_id_mapper = DocumentIDMapper()
         self.tokenizer = Tokenizer()
-        self.partial_index_count = 0  # To count the number of partial indexes
+        self.partial_index_count = 0
         self.index_directory = index_directory
+        self.save_tokenization = save_tokenization
+        self.token_cache_directory = token_cache_directory or f"{index_directory}/token_cache"
 
-        # Create index directory if it doesn't exist
-        if not os.path.exists(self.index_directory):
-            os.makedirs(self.index_directory)
+        # Create necessary directories
+        os.makedirs(self.index_directory, exist_ok=True)
+        if self.save_tokenization:
+            os.makedirs(self.token_cache_directory, exist_ok=True)
 
-    def create_partial_index(self, documents: List[str], document_ids: List[int]) -> PositionalIndex:
-        """
-        Given a list of documents and their corresponding document ids, create a partial index.
-        """
-        partial_index = PositionalIndex(document_id_mapper=None)  # Partial index doesn't need a DocumentIDMapper
+    def _save_tokenized_document(self, document_id: int, tokens: List[str]) -> None:
+        """Saves tokenized output to cache as bytes if enabled."""
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
+        with open(cache_file, 'wb') as f:  # Open in binary write mode
+            pickle.dump(tokens, f)  # Use pickle to serialize tokens
 
+    def _load_tokenized_document(self, document_id: int) -> Optional[List[str]]:
+        """Loads tokenized output from cache if available."""
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as f:  # Open in binary read mode
+                return pickle.load(f)  # Use pickle to deserialize tokens
+        return None
+
+    def create_partial_index(self, documents: List[List[str]], document_ids: List[int]) -> PositionalIndex:
+        """Creates a partial index from given documents and their IDs."""
+        partial_index = PositionalIndex(document_id_mapper=None)
         for document, document_id in zip(documents, document_ids):
-            tokens = self.tokenizer.tokenize(document)
-            for term_position, term in enumerate(tokens, start=1):
+            for term_position, term in enumerate(document, start=1):
                 partial_index.add_posting(term, document_id, term_position)
-
         return partial_index
 
     def save_partial_index(self, partial_index: PositionalIndex) -> str:
-        """
-        Save a partial index to a file named partial_index_x.pickle in the index directory.
-        """
+        """Saves a partial index to disk and returns the filename."""
         filename = f"{self.index_directory}/partial_index_{self.partial_index_count}.pickle"
-        self.partial_index_count += 1
         with open(filename, 'wb') as f:
             pickle.dump(partial_index.to_dict(), f)
+        self.partial_index_count += 1
         return filename
 
     def merge_partial_indexes(self, partial_index_files: List[str]) -> PositionalIndex:
-        """
-        Merge multiple partial indexes into a final index.
-        """
-        final_index = PositionalIndex(
-            document_id_mapper=self.document_id_mapper)  # Create final index with the DocumentIDMapper
-
-        # Start the timer for the merge process
+        """Merges all partial indexes into a final index."""
+        final_index = PositionalIndex(document_id_mapper=self.document_id_mapper)
         start_time = time.time()
-        total_partial_indexes_merged = 0  # Counter for the number of partial indexes merged
 
-        for filename in partial_index_files:
+        for idx, filename in enumerate(partial_index_files, start=1):
             with open(filename, 'rb') as f:
                 partial_index_data = pickle.load(f)
                 partial_index = PositionalIndex.from_dict(partial_index_data)
 
-                for term, postings_list in partial_index.positional_index.items():
-                    for doc_id, posting in postings_list.postings.items():
-                        # Update posting in final_index with all term positions from the posting in the partial index
-                        for position in posting.positions:
-                            final_index.add_posting(term, doc_id, position)
+            for term, postings_list in partial_index.positional_index.items():
+                for doc_id, posting in postings_list.postings.items():
+                    for position in posting.positions:
+                        final_index.add_posting(term, doc_id, position)
 
-                total_partial_indexes_merged += 1  # Increment the partial index counter
+            if idx % 5000 == 0:
+                print(f"Merged {idx} partial indexes... Elapsed time: {time.time() - start_time:.2f} seconds")
 
-                # Print status update every 5000 partial indexes merged
-                if total_partial_indexes_merged % 5000 == 0:
-                    elapsed_time = time.time() - start_time  # Calculate elapsed time
-                    print(f"Merged {total_partial_indexes_merged} partial indexes... "
-                          f"Total elapsed time: {elapsed_time:.2f} seconds")
         return final_index
 
     def save_final_index(self, final_index: PositionalIndex, filename: str = 'final_index.pickle') -> None:
-        """
-        Save the final index to a file named final_index.pickle in the index directory.
-        """
+        """Saves the final merged index to disk."""
         filepath = f"{self.index_directory}/{filename}"
         with open(filepath, 'wb') as f:
             pickle.dump(final_index.to_dict(), f)
@@ -274,8 +272,7 @@ class SPIMIIndexer:
 
     def create_index_from_directory(self, directory: str, memory_limit: int = 2000) -> PositionalIndex:
         """
-        Create a positional index using the SPIMI approach for documents in a directory.
-        :param memory_limit: The combined length of documents (in characters) in a batch will be limited by memory_limit.
+        Creates a positional index using the SPIMI approach for documents in a directory.
         """
         print(f'Creating positional index for directory: {directory}')
         self.document_id_mapper.create_from_directory(directory)
@@ -283,53 +280,36 @@ class SPIMIIndexer:
         print(f'Total documents: {total_documents}')
 
         partial_index_files = []
-        document_batch = []
-        document_id_batch = []
-        batch_size = 0
-        total_docs_processed = 0
-
-        # Start the timer
+        document_batch, document_id_batch = [], []
+        batch_size, total_docs_processed = 0, 0
         start_time = time.time()
 
-        # Process documents in chunks based on memory limit
         for count, (document_name, document_id) in enumerate(self.document_id_mapper.document_to_id.items(), start=1):
-            with open(f'{self.document_id_mapper.directory}/{document_name}', 'r') as f:
-                document = f.read()
-                document_batch.append(document)
-                document_id_batch.append(document_id)
-                batch_size += len(document)  # Approximate memory usage by document text length
+            tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
+                open(f'{self.document_id_mapper.directory}/{document_name}', 'r').read())
+            if self.save_tokenization:
+                self._save_tokenized_document(document_id, tokens)
 
-            # Batch gets processed when memory limit is reached or the last document is processed
+            document_batch.append(tokens)
+            document_id_batch.append(document_id)
+            batch_size += sum(len(token) for token in tokens)
+
             if batch_size >= memory_limit or count == total_documents:
                 partial_index = self.create_partial_index(document_batch, document_id_batch)
-                partial_index_file = self.save_partial_index(partial_index)
-                partial_index_files.append(partial_index_file)
+                partial_index_files.append(self.save_partial_index(partial_index))
 
-                # Increment total documents processed
                 total_docs_processed += len(document_batch)
-
-                # Progress report every 10,000 documents processed
                 if total_docs_processed % 10000 < len(document_batch):
-                    elapsed_time = time.time() - start_time  # Calculate total elapsed time
-                    print(f"Processed {total_docs_processed} / {total_documents} documents... "
-                          f"Total elapsed time: {elapsed_time:.2f} seconds")
+                    print(
+                        f"Processed {total_docs_processed}/{total_documents} documents... Elapsed time: {time.time() - start_time:.2f} seconds")
 
-                # Clear the batch
-                document_batch = []
-                document_id_batch = []
-                batch_size = 0
+                document_batch, document_id_batch, batch_size = [], [], 0
 
         print(f'Merging {len(partial_index_files)} partial indexes...')
         final_index = self.merge_partial_indexes(partial_index_files)
-        print('Index creation complete.')
-
-        # Calculate TF-IDF scores
         final_index.calculate_tfidf()
+        self.save_final_index(final_index)
 
-        # Save final index
-        self.save_final_index(final_index, 'final_index.pickle')
-
-        # Remove partial indexes
         for filename in partial_index_files:
             os.remove(filename)
 
