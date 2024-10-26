@@ -3,7 +3,6 @@ Contains the Tokenizer class, which can be used to convert a text into a list of
 """
 
 import os
-import string
 from typing import List
 
 import nltk
@@ -14,6 +13,9 @@ from custom_types import Token
 class Tokenizer:
     def __init__(self):
         self.set_nltk_data_dir()  # Change directory where nltk looks for data to src/nltk_data
+        self.lemmatizer = nltk.stem.WordNetLemmatizer()  # lemmatizer object
+        self.stopwords = set(nltk.corpus.stopwords.words("english"))  # set of english stopwords
+        self.tokenizer = nltk.RegexpTokenizer(r'\w+')  # regular expression to only match sequences of word characters
 
     def set_nltk_data_dir(self):
         """
@@ -31,31 +33,11 @@ class Tokenizer:
         :param text: input text
         :return: List of tokens
         """
-        # Remove leading and trailing white space
-        text = text.strip()
-
-        # Replace multiple consecutive white space characters with a single space
-        text = " ".join(text.split())
-
-        # Tokenize the text
-        tokens = nltk.word_tokenize(text)
-
-        # remove punctuation
-        tokens_without_punctuation = [token for token in tokens if token not in string.punctuation]
-
-        # Lowercase the tokens
-        lowercased_tokens = [token.lower() for token in tokens_without_punctuation]
-
-        # Get list of stopwords in English
-        stopwords = nltk.corpus.stopwords.words("english")
-
-        # Remove stopwords
-        tokens_without_stopwords = [token for token in lowercased_tokens if token not in stopwords]
-
-        # Create lemmatizer object
-        lemmatizer = nltk.stem.WordNetLemmatizer()
-
-        # Lemmatize each token
-        lemmatized_tokens = [lemmatizer.lemmatize(token) for token in tokens_without_stopwords]
+        tokens = self.tokenizer.tokenize(text)  # tokenize
+        lemmatized_tokens = [
+            self.lemmatizer.lemmatize(token.lower())  # convert to lowercase + lematize
+            for token in tokens
+            if token.lower() not in self.stopwords  # remove stopwords
+        ]
 
         return lemmatized_tokens
