@@ -33,7 +33,7 @@ def main():
 
     final_index = spimi_indexer.create_index_from_directory(documents_dir, MEMORY_LIMIT)
 
-    tolerate = final_index.get("tolerate")  # Use .get() to avoid KeyError if not found
+    tolerate = final_index.positional_index.get("tolerate")  # Use .get() to avoid KeyError if not found
     if tolerate:
         tolerate.pretty_print()
 

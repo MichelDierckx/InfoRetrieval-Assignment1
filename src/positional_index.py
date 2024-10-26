@@ -1,9 +1,10 @@
 import json
+import math
 import os
 import pickle
 import time
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from custom_types import Term, DocID
 from document_id_mapper import DocumentIDMapper
@@ -111,6 +112,67 @@ class PostingsList:
         print(json.dumps(self.to_dict(), indent=4))
 
 
+class PositionalIndex:
+    def __init__(self, document_id_mapper: Optional[DocumentIDMapper]):
+        self.document_id_mapper = document_id_mapper
+        self.positional_index: Dict[Term, PostingsList] = defaultdict(PostingsList)
+
+    def add_posting(self, term: Term, document_id: DocID, term_position: int):
+        self.positional_index[term].update(document_id, term_position)
+
+    def calculate_tfidf(self):
+        if self.document_id_mapper is None:
+            return
+        total_docs = self.document_id_mapper.total_docs
+        print('Calculating tf-idf weights...')
+        for postings_list in self.positional_index.values():
+            postings_list.calculate_tfidf(total_docs)
+        print('Normalizing tf-idf weights...')
+        self.normalize_tfidf()
+
+    def get_doc_lengths(self) -> Dict[DocID, float]:
+        doc_lengths: Dict[DocID, float] = {}
+
+        for postings_list in self.positional_index.values():
+            for document_id, posting in postings_list.postings.items():
+                doc_lengths.setdefault(document_id, 0)  # if not present, first init to zero
+                doc_lengths[document_id] += posting.tfidf ** 2
+
+        for document_id, doc_length in doc_lengths.items():
+            doc_lengths[document_id] = math.sqrt(doc_length)
+
+        return doc_lengths
+
+    def normalize_tfidf(self):
+        doc_lengths = self.get_doc_lengths()
+        for postings_list in self.positional_index.values():
+            for document_id, posting in postings_list.postings.items():
+                posting.tfidf = posting.tfidf / doc_lengths[document_id]
+
+    def to_dict(self) -> Dict:
+        if self.document_id_mapper is None:
+            return {
+                'postings': {term: postings.to_dict() for term, postings in self.positional_index.items()}
+            }
+        return {
+            'document_id_mapper': self.document_id_mapper.to_dict(),
+            'postings': {term: postings.to_dict() for term, postings in self.positional_index.items()}
+        }
+
+    @staticmethod
+    def from_dict(data: Dict):
+        if 'document_id_mapper' in data.keys():
+            document_id_mapper = DocumentIDMapper.from_dict(
+                data['document_id_mapper'])
+        else:
+            document_id_mapper = None
+        index = PositionalIndex(document_id_mapper)
+        index.positional_index = {
+            term: PostingsList.from_dict(postings_data) for term, postings_data in data['postings'].items()
+        }
+        return index
+
+
 class SPIMIIndexer:
     def __init__(self, index_directory: str = 'saved_index_full_docs_small'):
         """
@@ -125,71 +187,70 @@ class SPIMIIndexer:
         if not os.path.exists(self.index_directory):
             os.makedirs(self.index_directory)
 
-    def create_partial_index(self, documents: List[str], document_ids: List[int]) -> Dict[Term, PostingsList]:
+    def create_partial_index(self, documents: List[str], document_ids: List[int]) -> PositionalIndex:
         """
-        Given a dictionary of documents and their corresponding document id's, create a partial index.
+        Given a list of documents and their corresponding document ids, create a partial index.
         """
-        partial_index = defaultdict(PostingsList)
+        partial_index = PositionalIndex(document_id_mapper=None)  # Partial index doesn't need a DocumentIDMapper
 
         for document, document_id in zip(documents, document_ids):
             tokens = self.tokenizer.tokenize(document)
             for term_position, term in enumerate(tokens, start=1):
-                partial_index[term].update(document_id, term_position)
+                partial_index.add_posting(term, document_id, term_position)
 
         return partial_index
 
-    def save_partial_index(self, partial_index: Dict[Term, PostingsList]) -> str:
+    def save_partial_index(self, partial_index: PositionalIndex) -> str:
         """
-        Save a partial index to a file named partial_index_x.pickly in the index directory.
+        Save a partial index to a file named partial_index_x.pickle in the index directory.
         """
         filename = f"{self.index_directory}/partial_index_{self.partial_index_count}.pickle"
         self.partial_index_count += 1
         with open(filename, 'wb') as f:
-            pickle.dump({term: postings.to_list() for term, postings in partial_index.items()}, f)
+            pickle.dump(partial_index.to_dict(), f)
         return filename
 
-    def merge_partial_indexes(self, partial_index_files: List[str]) -> Dict[Term, PostingsList]:
+    def merge_partial_indexes(self, partial_index_files: List[str]) -> PositionalIndex:
         """
         Merge multiple partial indexes into a final index.
         """
-        final_index = defaultdict(PostingsList)
+        final_index = PositionalIndex(
+            document_id_mapper=self.document_id_mapper)  # Create final index with the DocumentIDMapper
 
         # Start the timer for the merge process
         start_time = time.time()
-        total_merges = 0  # Counter for the number of merges
+        total_partial_indexes_merged = 0  # Counter for the number of partial indexes merged
 
         for filename in partial_index_files:
             with open(filename, 'rb') as f:
-                partial_index = pickle.load(f)
-                for term, postings_data in partial_index.items():
-                    postings_list = PostingsList.from_list(postings_data)
-                    if term not in final_index:
-                        final_index[term] = postings_list
-                    else:
-                        for doc_id, posting in postings_list.postings.items():
-                            # Update posting in final_index with all term positions from the posting in the partial index
-                            for position in posting.positions:
-                                final_index[term].update(doc_id, position)
+                partial_index_data = pickle.load(f)
+                partial_index = PositionalIndex.from_dict(partial_index_data)
 
-                    total_merges += 1  # Increment merge counter
+                for term, postings_list in partial_index.positional_index.items():
+                    for doc_id, posting in postings_list.postings.items():
+                        # Update posting in final_index with all term positions from the posting in the partial index
+                        for position in posting.positions:
+                            final_index.add_posting(term, doc_id, position)
 
-                    # Print status update every 5000 merges
-                    if total_merges % 5000 == 0:
-                        elapsed_time = time.time() - start_time  # Calculate elapsed time
-                        print(f"Merged {total_merges} postings... Total elapsed time: {elapsed_time:.2f} seconds")
+                total_partial_indexes_merged += 1  # Increment the partial index counter
 
+                # Print status update every 5000 partial indexes merged
+                if total_partial_indexes_merged % 5000 == 0:
+                    elapsed_time = time.time() - start_time  # Calculate elapsed time
+                    print(f"Merged {total_partial_indexes_merged} partial indexes... "
+                          f"Total elapsed time: {elapsed_time:.2f} seconds")
         return final_index
 
-    def save_final_index(self, final_index: Dict[Term, PostingsList], filename: str = 'final_index.pickle') -> None:
+    def save_final_index(self, final_index: PositionalIndex, filename: str = 'final_index.pickle') -> None:
         """
         Save the final index to a file named final_index.pickle in the index directory.
         """
         filepath = f"{self.index_directory}/{filename}"
         with open(filepath, 'wb') as f:
-            pickle.dump({term: postings.to_list() for term, postings in final_index.items()}, f)
+            pickle.dump(final_index.to_dict(), f)
         print(f'Final index saved to {filepath}')
 
-    def create_index_from_directory(self, directory: str, memory_limit: int = 2000) -> Dict[Term, PostingsList]:
+    def create_index_from_directory(self, directory: str, memory_limit: int = 2000) -> PositionalIndex:
         """
         Create a positional index using the SPIMI approach for documents in a directory.
         :param memory_limit: The combined length of documents (in characters) in a batch will be limited by memory_limit.
@@ -239,6 +300,9 @@ class SPIMIIndexer:
         print(f'Merging {len(partial_index_files)} partial indexes...')
         final_index = self.merge_partial_indexes(partial_index_files)
         print('Index creation complete.')
+
+        # Calculate TF-IDF scores
+        final_index.calculate_tfidf()
 
         # Save final index
         self.save_final_index(final_index, 'final_index.pickle')
