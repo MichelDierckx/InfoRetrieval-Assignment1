@@ -152,11 +152,11 @@ class PositionalIndex:
     def to_dict(self) -> Dict:
         if self.document_id_mapper is None:
             return {
-                'postings': {term: postings.to_dict() for term, postings in self.positional_index.items()}
+                'index': {term: postings.to_dict() for term, postings in self.positional_index.items()}
             }
         return {
             'document_id_mapper': self.document_id_mapper.to_dict(),
-            'postings': {term: postings.to_dict() for term, postings in self.positional_index.items()}
+            'index': {term: postings.to_dict() for term, postings in self.positional_index.items()}
         }
 
     @staticmethod
@@ -168,9 +168,31 @@ class PositionalIndex:
             document_id_mapper = None
         index = PositionalIndex(document_id_mapper)
         index.positional_index = {
-            term: PostingsList.from_dict(postings_data) for term, postings_data in data['postings'].items()
+            term: PostingsList.from_dict(postings_data) for term, postings_data in data['index'].items()
         }
         return index
+
+    @staticmethod
+    def load_from_file(filename: str):
+        """
+        Load the positional index from a file (binary using pickle).
+        """
+        if not os.path.exists(filename):
+            print(f"Error: The file '{filename}' does not exist.")
+            return None
+
+        try:
+            print(f'Loading positional index from {filename}')
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+            print(f'Successfully loaded positional index from {filename}')
+            return PositionalIndex.from_dict(data)
+        except FileNotFoundError:
+            print(f"Error: The file '{filename}' was not found.")
+        except pickle.UnpicklingError:
+            print(f"Error: The file '{filename}' contains invalid pickle data.")
+        except Exception as e:
+            print(f"An error occurred while loading: {e}")
 
 
 class SPIMIIndexer:
