@@ -1,6 +1,5 @@
 import os
 import pickle
-import sys
 from typing import List, Optional
 
 import numpy as np
@@ -42,6 +41,18 @@ class InvertedIndex:
                     new_entry = np.array([(doc_id, 1)], dtype=structured_array.dtype)
                     structured_array = np.append(structured_array, new_entry)
                     self.index[term] = (doc_freq + 1, structured_array)  # Increment document frequency
+
+    def save_to_file(self, filename: str):
+        """Saves the inverted index to a file using pickle."""
+        with open(filename, 'wb') as f:
+            pickle.dump(self.index, f)
+        print(f"Inverted index saved to {filename}")
+
+    def load_from_file(self, filename: str):
+        """Loads the inverted index from a file using pickle."""
+        with open(filename, 'rb') as f:
+            self.index = pickle.load(f)
+        print(f"Inverted index loaded from {filename}")
 
     def print_index(self):
         """Prints the inverted index for visualization."""
@@ -98,5 +109,4 @@ class Indexer:
                 open(f'{directory}/{document}', 'r').read())
 
             inverted_index.add_document(document_id, tokens)
-        print("Size of dict: " + str(sys.getsizeof(inverted_index.index)) + "bytes")
         return inverted_index

@@ -37,6 +37,10 @@ def main():
 
     final_index = indexer.create_index_from_directory(documents_dir)
 
+    final_index.save_to_file(index_file)
+
+    final_index.load_from_file(index_file)
+
     final_index.print_posting_list("tolerate")
 
     profiler.disable()
