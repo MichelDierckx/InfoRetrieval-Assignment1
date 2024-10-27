@@ -1,114 +1,14 @@
-import json
 import os
-import pickle
 import sqlite3
 import time
-from typing import Dict, List, Optional
+import pickle
+from typing import Optional, List
 
 from custom_types import DocID
 from document_id_mapper import DocumentIDMapper
 from tf_idf import calculate_tf_idf_weight
 from tokenizer import Tokenizer
 
-
-class Posting:
-    def __init__(self):
-        self.tf = 0  # Term frequency
-        self.tfidf = 0.0  # normalized TF-IDF
-        self.positions: List[int] = []  # List of positions in the document
-
-    def update(self, term_position: int) -> None:
-        """
-        Update the Posting by adding a new position and incrementing the term frequency.
-        """
-        self.positions.append(term_position)
-        self.tf += 1
-
-    def calculate_tfidf(self, total_docs: int, df: int) -> None:
-        self.tfidf = calculate_tf_idf_weight(self.tf, total_docs, df)
-
-    def to_list(self) -> List:
-        """
-        Convert Posting object to a List[tf, tfidf, List[position]]
-        """
-        return [self.tf, self.tfidf, self.positions]
-
-    @staticmethod
-    def from_list(data: List):
-        """
-        Create a Posting object from a List[tf, tfidf, List[position]].
-        """
-        posting = Posting()
-        posting.tf = data[0]
-        posting.tfidf = data[1]
-        posting.positions = data[2]
-        return posting
-
-    def pretty_print(self) -> None:
-        """
-        Pretty print the Posting
-        """
-        print(self.to_list())
-
-
-class PostingsList:
-    def __init__(self):
-        self.df = 0
-        self.postings: Dict[DocID, Posting] = {}
-
-    def update(self, document_id: DocID, term_position: int):
-        if document_id in self.postings:
-            self.postings[document_id].update(term_position)
-        else:
-            self.postings[document_id] = Posting()
-            self.postings[document_id].update(term_position)
-            self.df += 1
-
-    def calculate_tfidf(self, total_docs: int) -> None:
-        for posting in self.postings.values():
-            posting.calculate_tfidf(total_docs, self.df)
-
-    def to_dict(self) -> Dict:
-        """
-        Convert PostingsList object to a dictionary.
-        """
-        return {
-            'df': self.df,
-            'postings': {doc_id: posting.to_list() for doc_id, posting in self.postings.items()}
-        }
-
-    @staticmethod
-    def from_dict(data: Dict):
-        """
-        Create a PostingsList object from a dictionary.
-        """
-        postings_list = PostingsList()
-        postings_list.df = data['df']
-        postings_list.postings = {
-            int(doc_id): Posting.from_list(posting) for doc_id, posting in data['postings'].items()
-        }
-        return postings_list
-
-    def to_list(self) -> List:
-        return [
-            self.df,  # first element is df
-            {doc_id: posting.to_list() for doc_id, posting in self.postings.items()}
-        ]
-
-    @staticmethod
-    def from_list(data: List):
-        postings_list = PostingsList()
-        postings_list.df = data[0]  # first element is df
-        postings_list.postings = {
-            int(doc_id): Posting.from_list(posting) for doc_id, posting in data[1].items()
-        }
-        return postings_list
-
-    def pretty_print(self) -> None:
-        """
-        Pretty print the PostingsList
-        """
-        print(json.dumps(self.to_dict(), indent=4))
 
 
 class PositionalIndex:
@@ -125,7 +25,7 @@ class PositionalIndex:
         self._initialize_db()
 
     def _initialize_db(self):
-        """Sets up SQLite tables with BLOB storage for positions."""
+        """Sets up SQLite tables without storing positions or tf-idf."""
         self.cursor.execute('''
             CREATE TABLE terms (
                 term TEXT PRIMARY KEY,
@@ -138,16 +38,14 @@ class PositionalIndex:
                 term_id INTEGER,
                 doc_id INTEGER,
                 tf INTEGER DEFAULT 1,
-                tfidf REAL,  -- Add tfidf column
-                positions BLOB,
                 PRIMARY KEY (term_id, doc_id),
                 FOREIGN KEY (term_id) REFERENCES terms (term_id)
             )
         ''')
 
-    def add_posting(self, term: str, document_id: int, term_position: int):
+    def add_posting(self, term: str, document_id: int):
         """
-        Add or update a posting for a term, storing positions as a BLOB.
+        Add or update a posting for a term, storing only tf.
         """
         # Check if the term already exists
         self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
@@ -163,27 +61,21 @@ class PositionalIndex:
             self.cursor.execute("UPDATE terms SET df = df + 1 WHERE term_id = ?", (term_id,))
 
         # Check if posting exists
-        self.cursor.execute("SELECT tf, positions FROM postings WHERE term_id = ? AND doc_id = ?",
-                            (term_id, document_id))
+        self.cursor.execute("SELECT tf FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, document_id))
         posting_row = self.cursor.fetchone()
 
         if posting_row:
-            # Update existing posting: increment tf and update positions
-            tf, positions_blob = posting_row
-            tf += 1
-            positions = pickle.loads(positions_blob)  # Deserialize positions
-            positions.append(term_position)
-            positions_blob = pickle.dumps(positions)  # Re-serialize positions
+            # Update existing posting: increment tf
+            tf = posting_row[0] + 1
             self.cursor.execute(
-                "UPDATE postings SET tf = ?, positions = ? WHERE term_id = ? AND doc_id = ?",
-                (tf, positions_blob, term_id, document_id)
+                "UPDATE postings SET tf = ? WHERE term_id = ? AND doc_id = ?",
+                (tf, term_id, document_id)
             )
         else:
-            # Insert new posting with tf = 1 and the initial position
-            positions_blob = pickle.dumps([term_position])
+            # Insert new posting with tf = 1
             self.cursor.execute(
-                "INSERT INTO postings (term_id, doc_id, tf, tfidf, positions) VALUES (?, ?, 1, NULL, ?)",
-                (term_id, document_id, positions_blob)  # Initially set tfidf to NULL
+                "INSERT INTO postings (term_id, doc_id, tf) VALUES (?, ?, 1)",
+                (term_id, document_id)
             )
 
     def save_to_disk(self, database_path: str):
@@ -202,93 +94,35 @@ class PositionalIndex:
         """Close in-memory SQLite connection."""
         self.conn.close()
 
-    def get_postings_list(self, term: str) -> Optional[PostingsList]:
+    def calculate_tfidf(self, term: str, doc_id: int) -> Optional[float]:
         """
-        Retrieve the Posting list for a specific term.
-        Returns a PostingsList object or None if the term does not exist.
+        Dynamically calculate the tf-idf for a given term and document ID.
         """
-        # Fetch term_id and document frequency (df) for the term
+        # Fetch term_id, document frequency (df) for the term, and total documents
         self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
         result = self.cursor.fetchone()
 
-        if result:
-            term_id, df = result
-            postings_list = PostingsList()
-            postings_list.df = df
+        if not result:
+            return None  # Term does not exist in index
 
-            # Fetch all postings for this term
-            self.cursor.execute("SELECT doc_id, tf, tfidf, positions FROM postings WHERE term_id = ?", (term_id,))
-            rows = self.cursor.fetchall()
-
-            for doc_id, tf, tfidf, positions_blob in rows:
-                positions = pickle.loads(positions_blob)  # Deserialize positions
-                posting = Posting()
-                posting.tf = tf
-                posting.tfidf = tfidf  # Ensure tfidf is included
-                posting.positions = positions
-                postings_list.postings[doc_id] = posting
-
-            return postings_list
-        return None
-
-    def get_positions(self, term: str, doc_id: int) -> Optional[List[int]]:
-        """
-        Retrieve positions of a term in a specific document.
-        """
-        self.cursor.execute("SELECT term_id FROM terms WHERE term = ?", (term,))
-        term_id_row = self.cursor.fetchone()
-
-        if term_id_row:
-            term_id = term_id_row[0]
-            self.cursor.execute("SELECT positions FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, doc_id))
-            row = self.cursor.fetchone()
-            if row:
-                return pickle.loads(row[0])  # Deserialize positions
-        return None
-
-    def calculate_tfidf(self):
-        """
-        Calculate tf-idf for each posting.
-        """
+        term_id, df = result
         total_docs = self.document_id_mapper.total_docs
-        print('Calculating tf-idf weights...')
 
-        # Calculate tf-idf and update postings
-        self.cursor.execute("SELECT term_id, df FROM terms")
-        for term_id, df in self.cursor.fetchall():
-            self.cursor.execute("SELECT doc_id, tf FROM postings WHERE term_id = ?", (term_id,))
-            postings = self.cursor.fetchall()
-            for doc_id, tf in postings:
-                tfidf = calculate_tf_idf_weight(tf, total_docs, df)
-                self.cursor.execute(
-                    "UPDATE postings SET tfidf = ? WHERE term_id = ? AND doc_id = ?", (tfidf, term_id, doc_id)
-                )
-        self.conn.commit()
+        # Fetch term frequency (tf) for the given document
+        self.cursor.execute("SELECT tf FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, doc_id))
+        tf_row = self.cursor.fetchone()
 
-    def normalize_tfidf(self):
-        """
-        Normalize tf-idf values by document length using a single SQL statement.
-        """
-        self.cursor.execute('''
-            WITH doc_lengths AS (
-                SELECT doc_id, SQRT(SUM(tfidf * tfidf)) AS length
-                FROM postings
-                GROUP BY doc_id
-            )
-            UPDATE postings
-            SET tfidf = tfidf / dl.length
-            FROM doc_lengths dl
-            WHERE postings.doc_id = dl.doc_id AND dl.length > 0
-        ''')
-
-        self.conn.commit()
+        if tf_row:
+            tf = tf_row[0]
+            return calculate_tf_idf_weight(tf, total_docs, df)
+        return None  # Document does not contain the term
 
 
 class SPIMIIndexer:
     def __init__(self, database_path: str = 'data/saved_indexes/full_docs_small/full_docs_small_index.sqlite',
                  save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
         self.tokenizer = Tokenizer()
-        self.database_path = database_path  # Changed from index_directory to database_path
+        self.database_path = database_path
         self.save_tokenization = save_tokenization
         self.token_cache_directory = token_cache_directory or 'data/tokenized_documents/full_docs_small'
 
@@ -298,16 +132,16 @@ class SPIMIIndexer:
 
     def _save_tokenized_document(self, document_id: int, tokens: List[str]) -> None:
         """Saves tokenized output to cache as bytes if enabled."""
-        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
-        with open(cache_file, 'wb') as f:  # Open in binary write mode
-            pickle.dump(tokens, f)  # Use pickle to serialize tokens
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"
+        with open(cache_file, 'wb') as f:
+            pickle.dump(tokens, f)
 
     def _load_tokenized_document(self, document_id: int) -> Optional[List[str]]:
         """Loads tokenized output from cache if available."""
-        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"
         if os.path.exists(cache_file):
-            with open(cache_file, 'rb') as f:  # Open in binary read mode
-                return pickle.load(f)  # Use pickle to deserialize tokens
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
         return None
 
     def create_index_from_directory(self, directory: str) -> PositionalIndex:
@@ -328,18 +162,16 @@ class SPIMIIndexer:
             if self.save_tokenization:
                 self._save_tokenized_document(document_id, tokens)
 
-            for term_position, term in enumerate(tokens, start=1):
-                positional_index.add_posting(term, document_id, term_position)
+            for term in tokens:
+                positional_index.add_posting(term, document_id)
             total_docs_processed += 1
 
             if total_docs_processed % 1000 == 0:
                 print(
                     f"Processed {total_docs_processed}/{total_documents} documents... Elapsed time: {time.time() - start_time:.2f} seconds")
 
-        positional_index.calculate_tfidf()
-        positional_index.normalize_tfidf()
+        positional_index.conn.commit()
         positional_index.save_to_disk(self.database_path)
-        # positional_index.close()
         print(f"Index created at {self.database_path}")
 
         return positional_index

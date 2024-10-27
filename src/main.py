@@ -38,10 +38,10 @@ def main():
     final_index = spimi_indexer.create_index_from_directory(documents_dir)
 
     # final_index.load_from_disk(index_file)
-
-    tolerate_posting_list = final_index.get_postings_list('tolerate')
-    if tolerate_posting_list is not None:
-        tolerate_posting_list.pretty_print()
+    #
+    # tolerate_posting_list = final_index.get_postings_list('tolerate')
+    # if tolerate_posting_list is not None:
+    #     tolerate_posting_list.pretty_print()
 
     # Stop profiling
     profiler.disable()
