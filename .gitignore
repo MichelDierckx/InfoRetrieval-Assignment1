@@ -2,4 +2,6 @@
 .idea
 data/documents/
 data/queries/
+data/saved_indexes
+data/tokenized_documents
 src/nltk_data/
