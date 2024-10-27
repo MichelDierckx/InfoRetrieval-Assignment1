@@ -2,7 +2,7 @@ import cProfile
 import io
 import pstats
 
-from positional_index import SPIMIIndexer
+from positional_index import Indexer
 
 FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
 FULL_DOCS_DIRECTORY = "data/documents/full_docs"
@@ -33,17 +33,12 @@ def main():
     # Start profiling
     profiler.enable()
 
-    spimi_indexer = SPIMIIndexer(index_file, SAVE_TOKENIZED_DOCUMENTS, token_cache_dir)
+    indexer = Indexer(SAVE_TOKENIZED_DOCUMENTS, token_cache_dir)
 
-    final_index = spimi_indexer.create_index_from_directory(documents_dir)
+    final_index = indexer.create_index_from_directory(documents_dir)
 
-    # final_index.load_from_disk(index_file)
-    #
-    # tolerate_posting_list = final_index.get_postings_list('tolerate')
-    # if tolerate_posting_list is not None:
-    #     tolerate_posting_list.pretty_print()
+    final_index.print_posting_list("tolerate")
 
-    # Stop profiling
     profiler.disable()
 
     # Print profiling results (only from module src)

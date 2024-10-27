@@ -1,128 +1,69 @@
 import os
-import sqlite3
-import time
 import pickle
-from typing import Optional, List
+import sys
+from typing import List, Optional
 
-from custom_types import DocID
-from document_id_mapper import DocumentIDMapper
-from tf_idf import calculate_tf_idf_weight
+import numpy as np
+from natsort import natsorted
+
 from tokenizer import Tokenizer
 
 
+def extract_id_from_filename(filename):
+    id_str = filename.split('_')[1]
+    id_str = id_str.split('.')[0]
+    return int(id_str)
 
-class PositionalIndex:
-    def __init__(self, database_path: str, document_id_mapper: DocumentIDMapper):
-        self.conn = sqlite3.connect(":memory:")  # Create an in-memory database
-        self.cursor = self.conn.cursor()
-        self.database_path = database_path
-        self.document_id_mapper = document_id_mapper
 
-        # Initialize term ID counter
-        self.term_id_counter = 1  # Start term IDs from 1
+class InvertedIndex:
+    def __init__(self):
+        # Dictionary to hold the inverted index
+        # Key: term, Value: (document frequency, structured numpy array)
+        self.index = {}
 
-        # Initialize tables for terms and postings in memory
-        self._initialize_db()
+    def add_document(self, doc_id: int, tokens: List[str]):
+        """Tokenizes the text and updates the inverted index."""
+        # Update the inverted index
+        for term in tokens:
+            if term not in self.index:
+                # Create a structured array for the term
+                structured_array = np.zeros(1, dtype=[('document_id', 'i4'), ('term_frequency', 'i4')])
+                structured_array[0] = (doc_id, 1)  # Initialize term frequency to 1
+                self.index[term] = (1, structured_array)  # (document frequency, structured array)
+            else:
+                doc_freq, structured_array = self.index[term]
 
-    def _initialize_db(self):
-        """Sets up SQLite tables without storing positions or tf-idf."""
-        self.cursor.execute('''
-            CREATE TABLE terms (
-                term TEXT PRIMARY KEY,
-                term_id INTEGER UNIQUE,
-                df INTEGER DEFAULT 0
-            )
-        ''')
-        self.cursor.execute('''
-            CREATE TABLE postings (
-                term_id INTEGER,
-                doc_id INTEGER,
-                tf INTEGER DEFAULT 1,
-                PRIMARY KEY (term_id, doc_id),
-                FOREIGN KEY (term_id) REFERENCES terms (term_id)
-            )
-        ''')
+                # Check only the last entry in the structured array
+                last_entry = structured_array[-1]
+                if last_entry['document_id'] == doc_id:
+                    last_entry['term_frequency'] += 1  # Increment term frequency
+                else:
+                    # If the document ID does not exist, append a new entry
+                    new_entry = np.array([(doc_id, 1)], dtype=structured_array.dtype)
+                    structured_array = np.append(structured_array, new_entry)
+                    self.index[term] = (doc_freq + 1, structured_array)  # Increment document frequency
 
-    def add_posting(self, term: str, document_id: int):
-        """
-        Add or update a posting for a term, storing only tf.
-        """
-        # Check if the term already exists
-        self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
-        row = self.cursor.fetchone()
+    def print_index(self):
+        """Prints the inverted index for visualization."""
+        for term, (df, arr) in self.index.items():
+            print(f"Term: '{term}', Document Frequency: {df}, Entries: {arr.tolist()}")
 
-        if row is None:
-            # Assign a new term_id
-            term_id = self.term_id_counter
-            self.term_id_counter += 1  # Increment counter for the next term
-            self.cursor.execute("INSERT INTO terms (term, term_id, df) VALUES (?, ?, 1)", (term, term_id))
+    def print_posting_list(self, term: str):
+        """Prints the entries for a specific term."""
+        if term in self.index:
+            df, arr = self.index[term]
+            print(f"Posting list for term: '{term}'")
+            print(f"Document Frequency: {df}")
+            print("Postings (Document ID, Term Frequency):")
+            for entry in arr:
+                print(f"  Document ID: {entry['document_id']}, Term Frequency: {entry['term_frequency']}")
         else:
-            term_id, df = row
-            self.cursor.execute("UPDATE terms SET df = df + 1 WHERE term_id = ?", (term_id,))
-
-        # Check if posting exists
-        self.cursor.execute("SELECT tf FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, document_id))
-        posting_row = self.cursor.fetchone()
-
-        if posting_row:
-            # Update existing posting: increment tf
-            tf = posting_row[0] + 1
-            self.cursor.execute(
-                "UPDATE postings SET tf = ? WHERE term_id = ? AND doc_id = ?",
-                (tf, term_id, document_id)
-            )
-        else:
-            # Insert new posting with tf = 1
-            self.cursor.execute(
-                "INSERT INTO postings (term_id, doc_id, tf) VALUES (?, ?, 1)",
-                (term_id, document_id)
-            )
-
-    def save_to_disk(self, database_path: str):
-        """Flush the in-memory database to disk using the backup method."""
-        backup_db = sqlite3.connect(database_path)
-        self.conn.backup(backup_db)
-        backup_db.close()  # Close the backup connection manually
-
-    def load_from_disk(self, database_path: str):
-        """Load the database from an existing SQLite file into memory using the backup method."""
-        disk_db = sqlite3.connect(database_path)
-        disk_db.backup(self.conn)
-        disk_db.close()  # Close the disk connection manually
-
-    def close(self):
-        """Close in-memory SQLite connection."""
-        self.conn.close()
-
-    def calculate_tfidf(self, term: str, doc_id: int) -> Optional[float]:
-        """
-        Dynamically calculate the tf-idf for a given term and document ID.
-        """
-        # Fetch term_id, document frequency (df) for the term, and total documents
-        self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
-        result = self.cursor.fetchone()
-
-        if not result:
-            return None  # Term does not exist in index
-
-        term_id, df = result
-        total_docs = self.document_id_mapper.total_docs
-
-        # Fetch term frequency (tf) for the given document
-        self.cursor.execute("SELECT tf FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, doc_id))
-        tf_row = self.cursor.fetchone()
-
-        if tf_row:
-            tf = tf_row[0]
-            return calculate_tf_idf_weight(tf, total_docs, df)
-        return None  # Document does not contain the term
+            print(f"Term: '{term}' not found in the index.")
 
 
-class SPIMIIndexer:
-    def __init__(self, database_path: str = 'data/saved_indexes/full_docs_small/full_docs_small_index.sqlite',
-                 save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
+class Indexer:
+    def __init__(self, save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
         self.tokenizer = Tokenizer()
-        self.database_path = database_path
         self.save_tokenization = save_tokenization
         self.token_cache_directory = token_cache_directory or 'data/tokenized_documents/full_docs_small'
 
@@ -132,46 +73,30 @@ class SPIMIIndexer:
 
     def _save_tokenized_document(self, document_id: int, tokens: List[str]) -> None:
         """Saves tokenized output to cache as bytes if enabled."""
-        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"
-        with open(cache_file, 'wb') as f:
-            pickle.dump(tokens, f)
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
+        with open(cache_file, 'wb') as f:  # Open in binary write mode
+            pickle.dump(tokens, f)  # Use pickle to serialize tokens
 
     def _load_tokenized_document(self, document_id: int) -> Optional[List[str]]:
         """Loads tokenized output from cache if available."""
-        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"
+        cache_file = f"{self.token_cache_directory}/doc_{document_id}.pkl"  # Changed to .pkl
         if os.path.exists(cache_file):
-            with open(cache_file, 'rb') as f:
-                return pickle.load(f)
+            with open(cache_file, 'rb') as f:  # Open in binary read mode
+                return pickle.load(f)  # Use pickle to deserialize tokens
         return None
 
-    def create_index_from_directory(self, directory: str) -> PositionalIndex:
+    def create_index_from_directory(self, directory: str) -> InvertedIndex:
         print(f'Creating positional index for directory: {directory}')
-        document_id_mapper = DocumentIDMapper()
-        positional_index = PositionalIndex(self.database_path, document_id_mapper)
-        positional_index.document_id_mapper.create_from_directory(directory)
-        total_documents = positional_index.document_id_mapper.total_docs
-        print(f'Total documents: {total_documents}')
+        inverted_index = InvertedIndex()
 
-        total_docs_processed = 0
-        start_time = time.time()
-
-        for count, (document_name, document_id) in enumerate(positional_index.document_id_mapper.document_to_id.items(),
-                                                             start=1):
+        # List all text files in the directory (sorted alphabetically)
+        files = natsorted(os.listdir(directory))
+        documents = [file for file in files if file.endswith(".txt")]
+        for document in documents:
+            document_id = extract_id_from_filename(document)
             tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
-                open(f'{positional_index.document_id_mapper.directory}/{document_name}', 'r').read())
-            if self.save_tokenization:
-                self._save_tokenized_document(document_id, tokens)
+                open(f'{directory}/{document}', 'r').read())
 
-            for term in tokens:
-                positional_index.add_posting(term, document_id)
-            total_docs_processed += 1
-
-            if total_docs_processed % 1000 == 0:
-                print(
-                    f"Processed {total_docs_processed}/{total_documents} documents... Elapsed time: {time.time() - start_time:.2f} seconds")
-
-        positional_index.conn.commit()
-        positional_index.save_to_disk(self.database_path)
-        print(f"Index created at {self.database_path}")
-
-        return positional_index
+            inverted_index.add_document(document_id, tokens)
+        print("Size of dict: " + str(sys.getsizeof(inverted_index.index)) + "bytes")
+        return inverted_index
