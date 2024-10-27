@@ -1,12 +1,11 @@
 import json
-import math
 import os
 import pickle
+import sqlite3
 import time
-from collections import defaultdict
 from typing import Dict, List, Optional
 
-from custom_types import Term, DocID
+from custom_types import DocID
 from document_id_mapper import DocumentIDMapper
 from tf_idf import calculate_tf_idf_weight
 from tokenizer import Tokenizer
@@ -113,103 +112,187 @@ class PostingsList:
 
 
 class PositionalIndex:
-    def __init__(self, document_id_mapper: Optional[DocumentIDMapper]):
+    def __init__(self, database_path: str, document_id_mapper: DocumentIDMapper):
+        self.conn = sqlite3.connect(":memory:")  # Create an in-memory database
+        self.cursor = self.conn.cursor()
+        self.database_path = database_path
         self.document_id_mapper = document_id_mapper
-        self.positional_index: Dict[Term, PostingsList] = defaultdict(PostingsList)
 
-    def add_posting(self, term: Term, document_id: DocID, term_position: int):
-        self.positional_index[term].update(document_id, term_position)
+        # Initialize term ID counter
+        self.term_id_counter = 1  # Start term IDs from 1
+
+        # Initialize tables for terms and postings in memory
+        self._initialize_db()
+
+    def _initialize_db(self):
+        """Sets up SQLite tables with BLOB storage for positions."""
+        self.cursor.execute('''
+            CREATE TABLE terms (
+                term TEXT PRIMARY KEY,
+                term_id INTEGER UNIQUE,
+                df INTEGER DEFAULT 0
+            )
+        ''')
+        self.cursor.execute('''
+            CREATE TABLE postings (
+                term_id INTEGER,
+                doc_id INTEGER,
+                tf INTEGER DEFAULT 1,
+                tfidf REAL,  -- Add tfidf column
+                positions BLOB,
+                PRIMARY KEY (term_id, doc_id),
+                FOREIGN KEY (term_id) REFERENCES terms (term_id)
+            )
+        ''')
+
+    def add_posting(self, term: str, document_id: int, term_position: int):
+        """
+        Add or update a posting for a term, storing positions as a BLOB.
+        """
+        # Check if the term already exists
+        self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            # Assign a new term_id
+            term_id = self.term_id_counter
+            self.term_id_counter += 1  # Increment counter for the next term
+            self.cursor.execute("INSERT INTO terms (term, term_id, df) VALUES (?, ?, 1)", (term, term_id))
+        else:
+            term_id, df = row
+            self.cursor.execute("UPDATE terms SET df = df + 1 WHERE term_id = ?", (term_id,))
+
+        # Check if posting exists
+        self.cursor.execute("SELECT tf, positions FROM postings WHERE term_id = ? AND doc_id = ?",
+                            (term_id, document_id))
+        posting_row = self.cursor.fetchone()
+
+        if posting_row:
+            # Update existing posting: increment tf and update positions
+            tf, positions_blob = posting_row
+            tf += 1
+            positions = pickle.loads(positions_blob)  # Deserialize positions
+            positions.append(term_position)
+            positions_blob = pickle.dumps(positions)  # Re-serialize positions
+            self.cursor.execute(
+                "UPDATE postings SET tf = ?, positions = ? WHERE term_id = ? AND doc_id = ?",
+                (tf, positions_blob, term_id, document_id)
+            )
+        else:
+            # Insert new posting with tf = 1 and the initial position
+            positions_blob = pickle.dumps([term_position])
+            self.cursor.execute(
+                "INSERT INTO postings (term_id, doc_id, tf, tfidf, positions) VALUES (?, ?, 1, NULL, ?)",
+                (term_id, document_id, positions_blob)  # Initially set tfidf to NULL
+            )
+
+    def save_to_disk(self, database_path: str):
+        """Flush the in-memory database to disk using the backup method."""
+        backup_db = sqlite3.connect(database_path)
+        self.conn.backup(backup_db)
+        backup_db.close()  # Close the backup connection manually
+
+    def load_from_disk(self, database_path: str):
+        """Load the database from an existing SQLite file into memory using the backup method."""
+        disk_db = sqlite3.connect(database_path)
+        disk_db.backup(self.conn)
+        disk_db.close()  # Close the disk connection manually
+
+    def close(self):
+        """Close in-memory SQLite connection."""
+        self.conn.close()
+
+    def get_postings_list(self, term: str) -> Optional[PostingsList]:
+        """
+        Retrieve the Posting list for a specific term.
+        Returns a PostingsList object or None if the term does not exist.
+        """
+        # Fetch term_id and document frequency (df) for the term
+        self.cursor.execute("SELECT term_id, df FROM terms WHERE term = ?", (term,))
+        result = self.cursor.fetchone()
+
+        if result:
+            term_id, df = result
+            postings_list = PostingsList()
+            postings_list.df = df
+
+            # Fetch all postings for this term
+            self.cursor.execute("SELECT doc_id, tf, tfidf, positions FROM postings WHERE term_id = ?", (term_id,))
+            rows = self.cursor.fetchall()
+
+            for doc_id, tf, tfidf, positions_blob in rows:
+                positions = pickle.loads(positions_blob)  # Deserialize positions
+                posting = Posting()
+                posting.tf = tf
+                posting.tfidf = tfidf  # Ensure tfidf is included
+                posting.positions = positions
+                postings_list.postings[doc_id] = posting
+
+            return postings_list
+        return None
+
+    def get_positions(self, term: str, doc_id: int) -> Optional[List[int]]:
+        """
+        Retrieve positions of a term in a specific document.
+        """
+        self.cursor.execute("SELECT term_id FROM terms WHERE term = ?", (term,))
+        term_id_row = self.cursor.fetchone()
+
+        if term_id_row:
+            term_id = term_id_row[0]
+            self.cursor.execute("SELECT positions FROM postings WHERE term_id = ? AND doc_id = ?", (term_id, doc_id))
+            row = self.cursor.fetchone()
+            if row:
+                return pickle.loads(row[0])  # Deserialize positions
+        return None
 
     def calculate_tfidf(self):
-        if self.document_id_mapper is None:
-            return
+        """
+        Calculate tf-idf for each posting.
+        """
         total_docs = self.document_id_mapper.total_docs
         print('Calculating tf-idf weights...')
-        for postings_list in self.positional_index.values():
-            postings_list.calculate_tfidf(total_docs)
-        print('Normalizing tf-idf weights...')
-        self.normalize_tfidf()
 
-    def get_doc_lengths(self) -> Dict[DocID, float]:
-        doc_lengths: Dict[DocID, float] = {}
-
-        for postings_list in self.positional_index.values():
-            for document_id, posting in postings_list.postings.items():
-                doc_lengths.setdefault(document_id, 0)  # if not present, first init to zero
-                doc_lengths[document_id] += posting.tfidf ** 2
-
-        for document_id, doc_length in doc_lengths.items():
-            doc_lengths[document_id] = math.sqrt(doc_length)
-
-        return doc_lengths
+        # Calculate tf-idf and update postings
+        self.cursor.execute("SELECT term_id, df FROM terms")
+        for term_id, df in self.cursor.fetchall():
+            self.cursor.execute("SELECT doc_id, tf FROM postings WHERE term_id = ?", (term_id,))
+            postings = self.cursor.fetchall()
+            for doc_id, tf in postings:
+                tfidf = calculate_tf_idf_weight(tf, total_docs, df)
+                self.cursor.execute(
+                    "UPDATE postings SET tfidf = ? WHERE term_id = ? AND doc_id = ?", (tfidf, term_id, doc_id)
+                )
+        self.conn.commit()
 
     def normalize_tfidf(self):
-        doc_lengths = self.get_doc_lengths()
-        for postings_list in self.positional_index.values():
-            for document_id, posting in postings_list.postings.items():
-                posting.tfidf = posting.tfidf / doc_lengths[document_id]
-
-    def to_dict(self) -> Dict:
-        if self.document_id_mapper is None:
-            return {
-                'index': {term: postings.to_dict() for term, postings in self.positional_index.items()}
-            }
-        return {
-            'document_id_mapper': self.document_id_mapper.to_dict(),
-            'index': {term: postings.to_dict() for term, postings in self.positional_index.items()}
-        }
-
-    @staticmethod
-    def from_dict(data: Dict):
-        if 'document_id_mapper' in data.keys():
-            document_id_mapper = DocumentIDMapper.from_dict(
-                data['document_id_mapper'])
-        else:
-            document_id_mapper = None
-        index = PositionalIndex(document_id_mapper)
-        index.positional_index = {
-            term: PostingsList.from_dict(postings_data) for term, postings_data in data['index'].items()
-        }
-        return index
-
-    @staticmethod
-    def load_from_file(filename: str):
         """
-        Load the positional index from a file (binary using pickle).
+        Normalize tf-idf values by document length using a single SQL statement.
         """
-        if not os.path.exists(filename):
-            print(f"Error: The file '{filename}' does not exist.")
-            return None
+        self.cursor.execute('''
+            WITH doc_lengths AS (
+                SELECT doc_id, SQRT(SUM(tfidf * tfidf)) AS length
+                FROM postings
+                GROUP BY doc_id
+            )
+            UPDATE postings
+            SET tfidf = tfidf / dl.length
+            FROM doc_lengths dl
+            WHERE postings.doc_id = dl.doc_id AND dl.length > 0
+        ''')
 
-        try:
-            print(f'Loading positional index from {filename}')
-            with open(filename, 'rb') as f:
-                data = pickle.load(f)
-            print(f'Successfully loaded positional index from {filename}')
-            return PositionalIndex.from_dict(data)
-        except FileNotFoundError:
-            print(f"Error: The file '{filename}' was not found.")
-        except pickle.UnpicklingError:
-            print(f"Error: The file '{filename}' contains invalid pickle data.")
-        except Exception as e:
-            print(f"An error occurred while loading: {e}")
+        self.conn.commit()
 
 
 class SPIMIIndexer:
-    def __init__(self, index_directory: str = 'saved_index_full_docs_small',
+    def __init__(self, database_path: str = 'data/saved_indexes/full_docs_small/full_docs_small_index.sqlite',
                  save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
-        """
-        Initializes the SPIMIIndexer object with directories for index files and token caches.
-        """
-        self.document_id_mapper = DocumentIDMapper()
         self.tokenizer = Tokenizer()
-        self.partial_index_count = 0
-        self.index_directory = index_directory
+        self.database_path = database_path  # Changed from index_directory to database_path
         self.save_tokenization = save_tokenization
-        self.token_cache_directory = token_cache_directory or f"{index_directory}/token_cache"
+        self.token_cache_directory = token_cache_directory or 'data/tokenized_documents/full_docs_small'
 
-        # Create necessary directories
-        os.makedirs(self.index_directory, exist_ok=True)
+        # Create the token cache directory if tokenization is saved
         if self.save_tokenization:
             os.makedirs(self.token_cache_directory, exist_ok=True)
 
@@ -227,90 +310,36 @@ class SPIMIIndexer:
                 return pickle.load(f)  # Use pickle to deserialize tokens
         return None
 
-    def create_partial_index(self, documents: List[List[str]], document_ids: List[int]) -> PositionalIndex:
-        """Creates a partial index from given documents and their IDs."""
-        partial_index = PositionalIndex(document_id_mapper=None)
-        for document, document_id in zip(documents, document_ids):
-            for term_position, term in enumerate(document, start=1):
-                partial_index.add_posting(term, document_id, term_position)
-        return partial_index
-
-    def save_partial_index(self, partial_index: PositionalIndex) -> str:
-        """Saves a partial index to disk and returns the filename."""
-        filename = f"{self.index_directory}/partial_index_{self.partial_index_count}.pickle"
-        with open(filename, 'wb') as f:
-            pickle.dump(partial_index.to_dict(), f)
-        self.partial_index_count += 1
-        return filename
-
-    def merge_partial_indexes(self, partial_index_files: List[str]) -> PositionalIndex:
-        """Merges all partial indexes into a final index."""
-        final_index = PositionalIndex(document_id_mapper=self.document_id_mapper)
-        start_time = time.time()
-
-        for idx, filename in enumerate(partial_index_files, start=1):
-            with open(filename, 'rb') as f:
-                partial_index_data = pickle.load(f)
-                partial_index = PositionalIndex.from_dict(partial_index_data)
-
-            for term, postings_list in partial_index.positional_index.items():
-                for doc_id, posting in postings_list.postings.items():
-                    for position in posting.positions:
-                        final_index.add_posting(term, doc_id, position)
-
-            if idx % 5000 == 0:
-                print(f"Merged {idx} partial indexes... Elapsed time: {time.time() - start_time:.2f} seconds")
-
-        return final_index
-
-    def save_final_index(self, final_index: PositionalIndex, filename: str = 'final_index.pickle') -> None:
-        """Saves the final merged index to disk."""
-        filepath = f"{self.index_directory}/{filename}"
-        with open(filepath, 'wb') as f:
-            pickle.dump(final_index.to_dict(), f)
-        print(f'Final index saved to {filepath}')
-
-    def create_index_from_directory(self, directory: str, memory_limit: int = 2000) -> PositionalIndex:
-        """
-        Creates a positional index using the SPIMI approach for documents in a directory.
-        """
+    def create_index_from_directory(self, directory: str) -> PositionalIndex:
         print(f'Creating positional index for directory: {directory}')
-        self.document_id_mapper.create_from_directory(directory)
-        total_documents = self.document_id_mapper.total_docs
+        document_id_mapper = DocumentIDMapper()
+        positional_index = PositionalIndex(self.database_path, document_id_mapper)
+        positional_index.document_id_mapper.create_from_directory(directory)
+        total_documents = positional_index.document_id_mapper.total_docs
         print(f'Total documents: {total_documents}')
 
-        partial_index_files = []
-        document_batch, document_id_batch = [], []
-        batch_size, total_docs_processed = 0, 0
+        total_docs_processed = 0
         start_time = time.time()
 
-        for count, (document_name, document_id) in enumerate(self.document_id_mapper.document_to_id.items(), start=1):
+        for count, (document_name, document_id) in enumerate(positional_index.document_id_mapper.document_to_id.items(),
+                                                             start=1):
             tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
-                open(f'{self.document_id_mapper.directory}/{document_name}', 'r').read())
+                open(f'{positional_index.document_id_mapper.directory}/{document_name}', 'r').read())
             if self.save_tokenization:
                 self._save_tokenized_document(document_id, tokens)
 
-            document_batch.append(tokens)
-            document_id_batch.append(document_id)
-            batch_size += sum(len(token) for token in tokens)
+            for term_position, term in enumerate(tokens, start=1):
+                positional_index.add_posting(term, document_id, term_position)
+            total_docs_processed += 1
 
-            if batch_size >= memory_limit or count == total_documents:
-                partial_index = self.create_partial_index(document_batch, document_id_batch)
-                partial_index_files.append(self.save_partial_index(partial_index))
+            if total_docs_processed % 1000 == 0:
+                print(
+                    f"Processed {total_docs_processed}/{total_documents} documents... Elapsed time: {time.time() - start_time:.2f} seconds")
 
-                total_docs_processed += len(document_batch)
-                if total_docs_processed % 10000 < len(document_batch):
-                    print(
-                        f"Processed {total_docs_processed}/{total_documents} documents... Elapsed time: {time.time() - start_time:.2f} seconds")
+        positional_index.calculate_tfidf()
+        positional_index.normalize_tfidf()
+        positional_index.save_to_disk(self.database_path)
+        # positional_index.close()
+        print(f"Index created at {self.database_path}")
 
-                document_batch, document_id_batch, batch_size = [], [], 0
-
-        print(f'Merging {len(partial_index_files)} partial indexes...')
-        final_index = self.merge_partial_indexes(partial_index_files)
-        final_index.calculate_tfidf()
-        self.save_final_index(final_index)
-
-        for filename in partial_index_files:
-            os.remove(filename)
-
-        return final_index
+        return positional_index
