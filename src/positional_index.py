@@ -25,7 +25,7 @@ def extract_id_from_filename(filename):
 
 
 class InvertedIndex:
-    def __init__(self):
+    def __init__(self, doc_count: int):
         # Dictionary structure:
         #   - Key: str -> term
         #   - Value: Tuple[int, np.ndarray] -> (document frequency, structured array of postings)
@@ -34,10 +34,10 @@ class InvertedIndex:
         #   - 'term_frequency': int -> Frequency of the term in the document
 
         self.index: Dict[str, Tuple[int, np.ndarray]] = {}  # Inverted index
-        self.doc_count: int = 0  # Total number of documents
+        self.doc_count: int = doc_count  # Total number of documents
+        self.doc_lengths: np.ndarray = np.zeros(doc_count, dtype=np.float64)  # Pre-allocated array for document lengths
 
     def add_document(self, doc_id: int, tokens: List[str]):
-        self.doc_count += 1  # Increment document count
         for term in tokens:
             if term not in self.index:
                 structured_array = np.zeros(1, dtype=[('document_id', 'i4'), ('term_frequency', 'i4')])
@@ -60,13 +60,13 @@ class InvertedIndex:
             return 0.0
         return np.log(self.doc_count / doc_freq)
 
-    def calculate_document_lengths(self) -> np.ndarray:
+    def calculate_document_lengths(self) -> None:
         """
-        Calculates the vector length for each document based on the tf-idf weight of each term
-        and returns a NumPy array of document lengths.
+        Calculates and stores the vector length for each document based on the tf-idf weight
+        of each term.
         """
-        # Preallocate a NumPy array for document lengths, using document_count as size
-        doc_lengths = np.zeros(self.doc_count, dtype=np.float64)
+        # Ensure the doc_lengths array is correctly reset
+        self.doc_lengths.fill(0)
 
         # Loop through each term and its posting list in the index
         for term, (doc_freq, postings) in self.index.items():
@@ -85,12 +85,10 @@ class InvertedIndex:
                 tf_idf_weight = tf_weight * idf_weight
 
                 # Sum the squares of tf-idf weights for each document
-                doc_lengths[doc_id - 1] += tf_idf_weight ** 2  # Use doc_id - 1 as the array index
+                self.doc_lengths[doc_id - 1] += tf_idf_weight ** 2  # Use doc_id - 1 as the array index
 
         # Take the square root of the sum of squares to get the vector length
-        doc_lengths = np.sqrt(doc_lengths)
-
-        return doc_lengths
+        np.sqrt(self.doc_lengths, out=self.doc_lengths)  # In-place square root to avoid additional memory usage
 
     def save(self, filename: str):
         """Save the inverted index to a file."""
@@ -154,11 +152,11 @@ class Indexer:
 
     def create_index_from_directory(self, directory: str) -> InvertedIndex:
         print(f'Creating positional index for directory: {directory}')
-        inverted_index = InvertedIndex()
 
         # List all text files in the directory (sorted alphabetically)
         files = natsorted(os.listdir(directory))
         documents = [file for file in files if file.endswith(".txt")]
+        inverted_index = InvertedIndex(len(documents))
         for document in documents:
             document_id = extract_id_from_filename(document)
             tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
