@@ -182,4 +182,5 @@ class Indexer:
                 open(f'{directory}/{document}', 'r').read())
 
             inverted_index.add_document(document_id, tokens)
+        inverted_index.calculate_document_lengths()
         return inverted_index
