@@ -1,11 +1,21 @@
 import os
 import pickle
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 
 import numpy as np
 from natsort import natsorted
 
 from tokenizer import Tokenizer
+
+
+# save document vector lengths in a (sorted numpy) array
+
+
+# Query processing:
+
+# tokenize query
+
+# see slide 28
 
 
 def extract_id_from_filename(filename):
@@ -16,43 +26,89 @@ def extract_id_from_filename(filename):
 
 class InvertedIndex:
     def __init__(self):
-        # Dictionary to hold the inverted index
-        # Key: term, Value: (document frequency, structured numpy array)
-        self.index = {}
+        # Dictionary structure:
+        #   - Key: str -> term
+        #   - Value: Tuple[int, np.ndarray] -> (document frequency, structured array of postings)
+        # The structured array contains:
+        #   - 'document_id': int -> ID of the document
+        #   - 'term_frequency': int -> Frequency of the term in the document
+
+        self.index: Dict[str, Tuple[int, np.ndarray]] = {}  # Inverted index
+        self.doc_count: int = 0  # Total number of documents
 
     def add_document(self, doc_id: int, tokens: List[str]):
-        """Tokenizes the text and updates the inverted index."""
-        # Update the inverted index
+        self.doc_count += 1  # Increment document count
         for term in tokens:
             if term not in self.index:
-                # Create a structured array for the term
                 structured_array = np.zeros(1, dtype=[('document_id', 'i4'), ('term_frequency', 'i4')])
-                structured_array[0] = (doc_id, 1)  # Initialize term frequency to 1
-                self.index[term] = (1, structured_array)  # (document frequency, structured array)
+                structured_array[0] = (doc_id, 1)
+                self.index[term] = (1, structured_array)
             else:
                 doc_freq, structured_array = self.index[term]
-
-                # Check only the last entry in the structured array
                 last_entry = structured_array[-1]
                 if last_entry['document_id'] == doc_id:
-                    last_entry['term_frequency'] += 1  # Increment term frequency
+                    last_entry['term_frequency'] += 1
                 else:
-                    # If the document ID does not exist, append a new entry
                     new_entry = np.array([(doc_id, 1)], dtype=structured_array.dtype)
                     structured_array = np.append(structured_array, new_entry)
-                    self.index[term] = (doc_freq + 1, structured_array)  # Increment document frequency
+                    self.index[term] = (doc_freq + 1, structured_array)
 
-    def save_to_file(self, filename: str):
-        """Saves the inverted index to a file using pickle."""
+    def calculate_idf_weight(self, term: str) -> float:
+        """Calculate IDF for a term."""
+        doc_freq, _ = self.index.get(term, (0, None))
+        if doc_freq == 0:
+            return 0.0
+        return np.log(self.doc_count / doc_freq)
+
+    def calculate_document_lengths(self) -> np.ndarray:
+        """
+        Calculates the vector length for each document based on the tf-idf weight of each term
+        and returns a NumPy array of document lengths.
+        """
+        # Preallocate a NumPy array for document lengths, using document_count as size
+        doc_lengths = np.zeros(self.doc_count, dtype=np.float64)
+
+        # Loop through each term and its posting list in the index
+        for term, (doc_freq, postings) in self.index.items():
+            # Calculate the IDF for the term
+            idf_weight = np.log(self.doc_count / doc_freq)
+
+            # Process each document in the posting list
+            for entry in postings:
+                doc_id = entry['document_id']
+                tf = entry['term_frequency']
+
+                # Calculate the term frequency weight (tf_weight)
+                tf_weight = 1 + np.log(tf)
+
+                # Calculate the tf-idf weight
+                tf_idf_weight = tf_weight * idf_weight
+
+                # Sum the squares of tf-idf weights for each document
+                doc_lengths[doc_id - 1] += tf_idf_weight ** 2  # Use doc_id - 1 as the array index
+
+        # Take the square root of the sum of squares to get the vector length
+        doc_lengths = np.sqrt(doc_lengths)
+
+        return doc_lengths
+
+    def save(self, filename: str):
+        """Save the inverted index to a file."""
         with open(filename, 'wb') as f:
-            pickle.dump(self.index, f)
+            # Save both the index and document count
+            pickle.dump({'index': self.index, 'doc_count': self.doc_count}, f)
         print(f"Inverted index saved to {filename}")
 
-    def load_from_file(self, filename: str):
-        """Loads the inverted index from a file using pickle."""
+    @classmethod
+    def load(cls, filename: str):
+        """Load the inverted index from a file."""
         with open(filename, 'rb') as f:
-            self.index = pickle.load(f)
+            data = pickle.load(f)
+            index_instance = cls()
+            index_instance.index = data['index']
+            index_instance.doc_count = data['doc_count']
         print(f"Inverted index loaded from {filename}")
+        return index_instance
 
     def print_index(self):
         """Prints the inverted index for visualization."""
