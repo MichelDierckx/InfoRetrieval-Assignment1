@@ -7,8 +7,8 @@ from positional_index import Indexer, InvertedIndex
 # Directories and file paths
 FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
 FULL_DOCS_DIRECTORY = "data/documents/full_docs"
-FULL_DOCS_SMALL_INDEX_FILE = "data/saved_indexes/full_docs_small/full_docs_small_inverted_index.npz"
-FULL_DOCS_INDEX_FILE = "data/saved_indexes/full_docs/full_docs_inverted_index.npz"
+FULL_DOCS_SMALL_INDEX_FILE = "data/saved_indexes/full_docs_small/full_docs_small_inverted_index.pkl"
+FULL_DOCS_INDEX_FILE = "data/saved_indexes/full_docs/full_docs_inverted_index.pkl"
 FULL_DOCS_SMALL_DOCUMENT_LENGTHS_FILE = "data/saved_indexes/full_docs_small/full_docs_small_lengths.npy"
 FULL_DOCS_DOCUMENT_LENGTHS_FILE = "data/saved_indexes/full_docs/full_docs_lengths.npy"
 FULL_DOCS_SMALL_TOKENIZED_DOCUMENTS_DIRECTORY = "data/tokenized_documents/full_docs_small"

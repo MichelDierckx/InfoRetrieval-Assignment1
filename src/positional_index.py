@@ -96,13 +96,9 @@ class InvertedIndex:
         np.save(lengths_filename, self.doc_lengths)
         print(f"Document lengths saved to {lengths_filename}")
 
-        # make numpy arrays from index
-        terms = np.array(list(self.index.keys()), dtype='U50')  # Create an array of terms
-        doc_freqs = np.array([value[0] for value in self.index.values()], dtype=np.int32)  # Document frequencies
-        postings_list = np.array([value[1] for value in self.index.values()], dtype=object)  # Structured arrays
-
-        # save index (using numpy)
-        np.savez(index_filename, terms=terms, doc_freqs=doc_freqs, postings=postings_list)
+        # Save the index using pickle
+        with open(index_filename, 'wb') as f:
+            pickle.dump({'index': self.index, 'doc_count': self.doc_count}, f)
         print(f"Inverted index saved to {index_filename}")
 
     @classmethod
@@ -116,12 +112,11 @@ class InvertedIndex:
         # document count is number of entries in the doc_lengths array
         index_instance.doc_count = index_instance.doc_lengths.shape[0]
 
-        # load the index
-        with np.load(index_filename, allow_pickle=True) as data:
-            index_instance.index = {}
-
-            for term, doc_freq, postings in zip(data['terms'], data['doc_freqs'], data['postings']):
-                index_instance.index[term] = (doc_freq, postings)
+        # load the index using pickle
+        with open(index_filename, 'rb') as f:
+            data = pickle.load(f)
+            index_instance.index = data['index']
+            index_instance.doc_count = data['doc_count']  # Ensure the document count is set
 
         print(f"Inverted index loaded from {index_filename}")
         print(f"Document lengths loaded from {lengths_filename}")
