@@ -4,6 +4,7 @@ from collections import Counter
 from typing import List, Optional, Tuple, Dict
 
 import numpy as np
+import pandas as pd
 from natsort import natsorted
 
 from tokenizer import Tokenizer
@@ -132,14 +133,15 @@ class InvertedIndex:
 
 
 class Indexer:
-    def __init__(self, tokenizer: Tokenizer, save_tokenization: bool = False,
+    def __init__(self, tokenizer: Tokenizer, save_tokenization: bool = False, load_tokenization: bool = False,
                  token_cache_directory: Optional[str] = None):
         self.tokenizer = tokenizer
         self.save_tokenization = save_tokenization
+        self.load_tokenization = load_tokenization
         self.token_cache_directory = token_cache_directory or 'data/tokenized_documents/full_docs_small'
 
         # Create the token cache directory if tokenization is saved
-        if self.save_tokenization:
+        if self.save_tokenization or self.load_tokenization:
             os.makedirs(self.token_cache_directory, exist_ok=True)
 
     def _save_tokenized_document(self, document_id: int, tokens: List[str]) -> None:
@@ -165,8 +167,17 @@ class Indexer:
         inverted_index = InvertedIndex(len(documents))
         for document in documents:
             document_id = extract_id_from_filename(document)
-            tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
-                open(f'{directory}/{document}', 'r').read())
+
+            # tokenize (load previous tokenization if flag is set to true and available)
+            if self.load_tokenization:
+                tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
+                    open(f'{directory}/{document}', 'r').read())
+            else:
+                tokens = self.tokenizer.tokenize(open(f'{directory}/{document}', 'r').read())
+
+            # save results of tokenization if flag is set to true
+            if self.save_tokenization:
+                self._save_tokenized_document(document_id, tokens)
 
             inverted_index.add_document(document_id, tokens)
         inverted_index.calculate_document_lengths()
@@ -235,3 +246,33 @@ class DocumentRanker:
             for term in query_vector:
                 query_vector[term] /= query_vector_length
         return query_vector
+
+    def rank_queries_from_file(self, input_file: str, output_file: str, delimiter: str = ',',
+                               top_k: Optional[int] = None) -> None:
+        """
+        Reads queries from a csv file and generates a ranking for them.
+
+        :param input_file: Path to the input CSV or TSV file with queries.
+        :param output_file: Path to the output file where rankings will be saved.
+        :param delimiter: The character used to separate values in the input file (default is ',').
+        :param top_k: How many top ranked documents to save in the output file; if None, saves all.
+        """
+        queries_df = pd.read_csv(input_file, delimiter=delimiter)
+        with open(output_file, 'w') as f:
+            # loop over queries
+            for _, row in queries_df.iterrows():
+                query_number = row['Query number']
+                query_text = row['Query']
+
+                # get the ranked documents for the current query
+                ranked_documents = self.rank_documents(query_text)
+
+                # only the top k should be returned
+                if top_k is not None:
+                    ranked_documents = ranked_documents[:top_k]
+
+                # write to file
+                for doc_id, _ in ranked_documents:
+                    f.write(f"{query_number},{doc_id}\n")
+
+        print(f"Rankings saved to {output_file}")
