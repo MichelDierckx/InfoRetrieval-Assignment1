@@ -188,8 +188,39 @@ class DocumentRanker:
         self.tokenizer = tokenizer
         self.inverted_index = inverted_index
 
-    def rank_documents(self, query):
-        query_vector = self.get_query_vector(query)
+    def rank_documents(self, query: str) -> List[Tuple[int, float]]:
+        """
+        Rank documents based on the query. Makes use of smart components ltc.ltc.
+        :param query: The search query
+        :return: A list of tuples (document_id, score) sorted by score in descending order.
+        """
+
+        query_vector = self.get_query_vector(query)  # normalized query vector
+        accumulators = Counter()  # hold accumulated score for every relevant document
+
+        # loop over terms in query
+        for term, tf_idf_query in query_vector.items():
+            # calculate idf_weight
+            doc_freq, postings_list = self.inverted_index.index[term]
+            idf_weight_doc = np.log(self.inverted_index.doc_count / doc_freq)
+            # loop over posting
+            for posting in postings_list:
+                doc_id = posting['document_id']
+                tf_doc = posting['term_frequency']
+                doc_length = self.inverted_index.doc_lengths[doc_id - 1]
+
+                # calculate tf_weight
+                tf_weight_doc = 1 + np.log(tf_doc)
+
+                # calculate tf_idf_weight
+                tf_idf_doc = (tf_weight_doc * idf_weight_doc) / doc_length
+
+                # update score for doc id
+                accumulators[doc_id] += tf_idf_doc * tf_idf_query
+
+        # sort the documents by score (descending)
+        sorted_doc_scores = accumulators.most_common()  # sorted [(doc_id, score), ...]
+        return sorted_doc_scores
 
     def get_query_vector(self, query) -> Dict[str, float]:
         query_tokens = self.tokenizer.tokenize(query)
@@ -198,7 +229,7 @@ class DocumentRanker:
         query_vector = {}
 
         for query_token in term_frequencies.keys():
-            if query_token in self.inverted_index.index:
+            if query_token in self.inverted_index.index.keys():
                 tf_weight = 1 + np.log(term_frequencies[query_token])
                 idf_weight = np.log(self.inverted_index.doc_count / self.inverted_index.index[query_token][0])
 

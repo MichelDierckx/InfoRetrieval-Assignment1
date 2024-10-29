@@ -2,7 +2,8 @@ import cProfile
 import io
 import pstats
 
-from positional_index import Indexer, InvertedIndex
+from inverted_index import Indexer, InvertedIndex, DocumentRanker
+from tokenizer import Tokenizer
 
 # Directories and file paths
 FULL_DOCS_SMALL_DIRECTORY = "data/documents/full_docs_small"
@@ -38,8 +39,11 @@ def main():
     # Start profiling
     profiler.enable()
 
+    # init tokenizer object
+    tokenizer = Tokenizer()
+
     # init indexer, used to create inverted index
-    indexer = Indexer(SAVE_TOKENIZED_DOCUMENTS, token_cache_dir)
+    indexer = Indexer(tokenizer, SAVE_TOKENIZED_DOCUMENTS, token_cache_dir)
 
     # let indexer create inverted index from the specified documents directory
     final_index = indexer.create_index_from_directory(documents_dir)
@@ -52,6 +56,15 @@ def main():
 
     # print posting list for tolerate
     loaded_index.print_posting_list("tolerate")
+
+    # object to rank documents given a query
+    document_ranker = DocumentRanker(tokenizer, loaded_index)
+
+    ranked_documents = document_ranker.rank_documents("types of road hugger tires")
+    # Print the rankings
+    print('Rankings:')
+    for doc_id, score in ranked_documents:
+        print(f'Document ID: {doc_id}, Score: {score:.4f}')  # Format score to 4 decimal places
 
     # stop profiling
     profiler.disable()
