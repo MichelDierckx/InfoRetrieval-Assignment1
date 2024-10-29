@@ -1,5 +1,6 @@
 import os
 import pickle
+from collections import Counter
 from typing import List, Optional, Tuple, Dict
 
 import numpy as np
@@ -15,7 +16,7 @@ from tokenizer import Tokenizer
 
 # tokenize query
 
-# see slide 28
+# see slide 28, adaptation -> also take query weighting in account! (1 + log()) terms / query length
 
 
 def extract_id_from_filename(filename):
@@ -141,8 +142,9 @@ class InvertedIndex:
 
 
 class Indexer:
-    def __init__(self, save_tokenization: bool = False, token_cache_directory: Optional[str] = None):
-        self.tokenizer = Tokenizer()
+    def __init__(self, tokenizer: Tokenizer, save_tokenization: bool = False,
+                 token_cache_directory: Optional[str] = None):
+        self.tokenizer = tokenizer
         self.save_tokenization = save_tokenization
         self.token_cache_directory = token_cache_directory or 'data/tokenized_documents/full_docs_small'
 
@@ -179,3 +181,36 @@ class Indexer:
             inverted_index.add_document(document_id, tokens)
         inverted_index.calculate_document_lengths()
         return inverted_index
+
+
+class DocumentRanker:
+    def __init__(self, tokenizer: Tokenizer, inverted_index: InvertedIndex):
+        self.tokenizer = tokenizer
+        self.inverted_index = inverted_index
+
+    def rank_documents(self, query):
+        query_vector = self.get_query_vector(query)
+
+    def get_query_vector(self, query) -> Dict[str, float]:
+        query_tokens = self.tokenizer.tokenize(query)
+        term_frequencies = Counter(query_tokens)
+        sum_of_tf_idf_squared = 0
+        query_vector = {}
+
+        for query_token in term_frequencies.keys():
+            if query_token in self.inverted_index.index:
+                tf_weight = 1 + np.log(term_frequencies[query_token])
+                idf_weight = np.log(self.inverted_index.doc_count / self.inverted_index.index[query_token][0])
+
+                # calculate tf_idf_weight
+                tf_idf_weight = tf_weight * idf_weight
+                query_vector[query_token] = tf_idf_weight
+
+                # sum the squares of tf-idf weights
+                sum_of_tf_idf_squared += tf_idf_weight ** 2
+        query_vector_length = np.sqrt(sum_of_tf_idf_squared)
+        # normalize query vector
+        if query_vector_length > 0:
+            for term in query_vector:
+                query_vector[term] /= query_vector_length
+        return query_vector
