@@ -9,16 +9,6 @@ from natsort import natsorted
 from tokenizer import Tokenizer
 
 
-# save document vector lengths in a (sorted numpy) array
-
-
-# Query processing:
-
-# tokenize query
-
-# see slide 28, adaptation -> also take query weighting in account! (1 + log()) terms / query length
-
-
 def extract_id_from_filename(filename):
     id_str = filename.split('_')[1]
     id_str = id_str.split('.')[0]
