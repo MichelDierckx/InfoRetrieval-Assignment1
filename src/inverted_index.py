@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 from collections import Counter
 from typing import List, Optional, Tuple, Dict
 
@@ -33,7 +34,7 @@ class InvertedIndex:
     def add_document(self, doc_id: int, tokens: List[str]):
         for term in tokens:
             if term not in self.index:
-                structured_array = np.zeros(1, dtype=[('document_id', 'i4'), ('term_frequency', 'i4')])
+                structured_array = np.zeros(1, dtype=[('document_id', 'u4'), ('term_frequency', 'u2')])
                 structured_array[0] = (doc_id, 1)
                 self.index[term] = (1, structured_array)
             else:
@@ -131,6 +132,48 @@ class InvertedIndex:
         else:
             print(f"Term: '{term}' not found in the index.")
 
+    def get_index_size_in_bytes(self) -> int:
+        """
+        Calculates the memory size of the inverted index in bytes, including a detailed breakdown.
+
+        :return: Total memory size of the inverted index in bytes.
+        """
+        size_doc_lengths = self.doc_lengths.nbytes
+        print(f'Total size of doc_lengths = {size_doc_lengths}')
+
+        # Calculate size of all numpy arrays in postings lists
+        size_inverted_index_numpy_arrays = 0
+        size_dict_entries = 0
+        size_term_keys = 0
+
+        # Create a list to hold all terms
+        all_terms = []
+
+        for term, (doc_freq, postings) in self.index.items():
+            size_inverted_index_numpy_arrays += postings.nbytes  # Posting list arrays
+            size_term_keys += sys.getsizeof(term)  # Memory size of each term (string)
+            size_dict_entries += sys.getsizeof((doc_freq, postings))  # Tuple size per entry
+
+            # Collect the term into the all_terms list
+            all_terms.append(term)
+
+        term_list_mem = 0
+        for t in all_terms:
+            term_list_mem += sys.getsizeof(t)
+        print(f'Total size of all terms array = {sys.getsizeof(all_terms)}')
+        print(f'Total size of all terms array = {term_list_mem}')
+
+        print(f'Total size of numpy arrays in postings lists = {size_inverted_index_numpy_arrays}')
+        print(f'Total size of all term keys (strings) = {size_term_keys}')
+        print(f'Total size of dictionary entries = {size_dict_entries}')
+        print(f'Total number of terms = {len(self.index)}')
+
+        total_index_size = (size_doc_lengths + size_inverted_index_numpy_arrays +
+                            size_term_keys + size_dict_entries)
+        print(f'Total index size = {total_index_size}')
+
+        return total_index_size
+
 
 class Indexer:
     def __init__(self, tokenizer: Tokenizer, save_tokenization: bool = False, load_tokenization: bool = False,
@@ -164,23 +207,33 @@ class Indexer:
         # List all text files in the directory (sorted alphabetically)
         files = natsorted(os.listdir(directory))
         documents = [file for file in files if file.endswith(".txt")]
-        inverted_index = InvertedIndex(len(documents))
-        for document in documents:
+        nr_documents = len(documents)
+        inverted_index = InvertedIndex(nr_documents)
+
+        # Process each document and build the inverted index
+        for i, document in enumerate(documents):
             document_id = extract_id_from_filename(document)
 
-            # tokenize (load previous tokenization if flag is set to true and available)
+            # Tokenize (load previous tokenization if the flag is set to true and available)
             if self.load_tokenization:
                 tokens = self._load_tokenized_document(document_id) or self.tokenizer.tokenize(
                     open(f'{directory}/{document}', 'r').read())
             else:
                 tokens = self.tokenizer.tokenize(open(f'{directory}/{document}', 'r').read())
 
-            # save results of tokenization if flag is set to true
+            # Save results of tokenization if the flag is set to true
             if self.save_tokenization:
                 self._save_tokenized_document(document_id, tokens)
 
             inverted_index.add_document(document_id, tokens)
+
+            # status update
+            if (i + 1) % 10000 == 0:
+                print(f'Processed {i + 1}/{nr_documents} documents...')
+
+        print(f'Processed {nr_documents}/{nr_documents} documents...')
         inverted_index.calculate_document_lengths()
+        print(f'Calculated document vector lengths.')
         return inverted_index
 
 
@@ -260,7 +313,7 @@ class DocumentRanker:
         queries_df = pd.read_csv(input_file, delimiter=delimiter)
         with open(output_file, 'w') as f:
             # loop over queries
-            for _, row in queries_df.iterrows():
+            for i, (_, row) in enumerate(queries_df.iterrows()):
                 query_number = row['Query number']
                 query_text = row['Query']
 
@@ -275,4 +328,8 @@ class DocumentRanker:
                 for doc_id, _ in ranked_documents:
                     f.write(f"{query_number},{doc_id}\n")
 
+                # status update
+                if (i + 1) % 500 == 0:
+                    print(f"Processed {i + 1} queries...")
+        print(f"Processed all queries...")
         print(f"Rankings saved to {output_file}")

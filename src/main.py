@@ -39,8 +39,8 @@ DEV_QUERIES_SMALL_RANKING = "dev_queries_small_ranking.csv"
 QUERIES_RANKING = "queries_rankings.csv"
 
 # flags
-SAVE_TOKENIZED_DOCUMENTS = True
-LOAD_TOKENIZED_DOCUMENTS = False
+SAVE_TOKENIZED_DOCUMENTS = False
+LOAD_TOKENIZED_DOCUMENTS = True
 DEV = True
 SIZE = "SMALL"  # either FULL or SMALL
 
@@ -95,6 +95,8 @@ def main():
 
     # let indexer create inverted index from the specified documents directory
     inverted_index = indexer.create_index_from_directory(directory=documents_dir)
+
+    inverted_index.get_index_size_in_bytes()
 
     # save the inverted index and document lengths to files
     inverted_index.save(index_filename=index_file,
