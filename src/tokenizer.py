@@ -39,5 +39,4 @@ class Tokenizer:
             for token in tokens
             if token.lower() not in self.stopwords  # remove stopwords
         ]
-
         return lemmatized_tokens

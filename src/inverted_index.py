@@ -1,12 +1,12 @@
 import os
 import pickle
-import sys
 from collections import Counter
 from typing import List, Optional, Tuple, Dict
 
 import numpy as np
 import pandas as pd
 from natsort import natsorted
+from scipy.sparse import save_npz, load_npz, lil_matrix
 
 from tokenizer import Tokenizer
 
@@ -18,161 +18,100 @@ def extract_id_from_filename(filename):
 
 
 class InvertedIndex:
-    def __init__(self, doc_count: int):
-        # Dictionary structure:
-        #   - Key: str -> term
-        #   - Value: Tuple[int, np.ndarray] -> (document frequency, structured array of postings)
-        # The structured array contains:
-        #   - 'document_id': int -> ID of the document
-        #   - 'term_frequency': int -> Frequency of the term in the document
+    def __init__(self, term_count, doc_count: int, term_to_id: Dict[str, int]):
+        # Total number of documents
+        self.doc_count: int = doc_count
+        self.term_count: int = term_count  # To keep track of the number of unique terms
+        self.term_to_id: Dict[str, int] = term_to_id  # Mapping from term to its index in the sparse matrix
 
-        self.index: Dict[str, Tuple[int, np.ndarray]] = {}  # Inverted index
-        self.doc_count: int = doc_count  # Total number of documents
-        self.doc_lengths: np.ndarray = np.zeros(doc_count,
-                                                dtype=np.float64)  # Array to save calculated document lengths
+        # Initialize the term frequency matrix (term_count, doc_count)
+        self.term_frequency_matrix = lil_matrix((term_count, doc_count), dtype=np.int16)
+        self.doc_lengths: np.ndarray = np.zeros(doc_count, dtype=np.float32)  # Document lengths
 
     def add_document(self, doc_id: int, tokens: List[str]):
         for term in tokens:
-            if term not in self.index:
-                structured_array = np.zeros(1, dtype=[('document_id', 'u4'), ('term_frequency', 'u2')])
-                structured_array[0] = (doc_id, 1)
-                self.index[term] = (1, structured_array)
-            else:
-                doc_freq, structured_array = self.index[term]
-                last_entry = structured_array[-1]
-                if last_entry['document_id'] == doc_id:
-                    last_entry['term_frequency'] += 1
-                else:
-                    new_entry = np.array([(doc_id, 1)], dtype=structured_array.dtype)
-                    structured_array = np.append(structured_array, new_entry)
-                    self.index[term] = (doc_freq + 1, structured_array)
+            term_index = self.term_to_id[term]
+            self.term_frequency_matrix[term_index, doc_id - 1] += 1  # Update frequency
 
-    def calculate_idf_weight(self, term: str) -> float:
-        """Calculate idf_weight given a term"""
-        doc_freq, _ = self.index.get(term, (0, None))
-        if doc_freq == 0:
-            return 0.0
-        return np.log(self.doc_count / doc_freq)
+    def finalize_index(self):
+        # Convert term frequency matrix to csr_matrix for efficient calculations
+        self.term_frequency_matrix = self.term_frequency_matrix.tocsr()
 
     def calculate_document_lengths(self) -> None:
         """
         Calculate document lengths.
         """
-        # reset doc_lengths array to 0 array
-        self.doc_lengths.fill(0)
+        self.doc_lengths = np.zeros(self.doc_count, dtype=np.float64)  # Reset lengths
 
-        # loop through index
-        for term, (doc_freq, postings) in self.index.items():
-            # calculate idf_weight
+        # iterate over rows
+        for term_index in range(self.term_frequency_matrix.shape[0]):
+            # pointers to start and end of row
+            start, end = self.term_frequency_matrix.indptr[term_index], self.term_frequency_matrix.indptr[
+                term_index + 1]
+            doc_indices = self.term_frequency_matrix.indices[start:end]  # indices for nonzero entries
+            tf_values = self.term_frequency_matrix.data[start:end]  # term frequency values
+
+            # Skip terms with zero document frequency
+            doc_freq = len(doc_indices)
+
+            # Calculate IDF weight for the term
             idf_weight = np.log(self.doc_count / doc_freq)
 
-            # for every document in the posting list
-            for entry in postings:
-                doc_id = entry['document_id']
-                tf = entry['term_frequency']
+            # Calculate TF weights (1 + log(tf)) and squared TF-IDF weights
+            tf_weights = 1 + np.log(tf_values)
+            tf_idf_weights = (tf_weights * idf_weight) ** 2
 
-                # calculate tf_weight
-                tf_weight = 1 + np.log(tf)
+            # Accumulate squared tf-idf weights into document lengths
+            np.add.at(self.doc_lengths, doc_indices, tf_idf_weights)
 
-                # calculate tf_idf_weight
-                tf_idf_weight = tf_weight * idf_weight
-
-                # sum the squares of tf-idf weights
-                self.doc_lengths[doc_id - 1] += tf_idf_weight ** 2  # Use doc_id - 1 as the array index
-
-        # take the square root, result is vector length
+        # Take the square root to get the final vector lengths
         np.sqrt(self.doc_lengths, out=self.doc_lengths)
 
-    def save(self, index_filename: str, lengths_filename: str):
-        """save the inverted index to index_filename and save the document vector lengths to lengths_filename."""
-        # Save the document lengths (using numpy)
+    def save(self, index_filename: str, lengths_filename: str, term_frequency_filename: str):
+        """Save the inverted index and other data."""
+        # Save document lengths using numpy
         np.save(lengths_filename, self.doc_lengths)
         print(f"Document lengths saved to {lengths_filename}")
 
-        # Save the index using pickle
+        # Save term frequency matrix using scipy
+        save_npz(term_frequency_filename, self.term_frequency_matrix)
+        print(f"Term frequency matrix saved to {term_frequency_filename}")
+
+        # Save metadata using pickle
         with open(index_filename, 'wb') as f:
-            pickle.dump({'index': self.index, 'doc_count': self.doc_count}, f)
+            pickle.dump({
+                'index': self.term_to_id,
+                'doc_count': self.doc_count,
+                'term_count': self.term_count
+            }, f)
         print(f"Inverted index saved to {index_filename}")
 
     @classmethod
-    def load(cls, index_filename: str, lengths_filename: str):
-        """load the index from index_filename and load the document vector lengths from lengths_filename."""
-        index_instance = cls(0)  # get InvertedIndex class instance with document count 0
+    def load(cls, index_filename: str, lengths_filename: str, term_frequency_filename: str):
+        """Load the index and other data."""
+        # Create an instance with dummy values
+        index_instance = cls(0, 0, {})
 
-        # Load the document lengths
+        # Load document lengths using numpy
         index_instance.doc_lengths = np.load(lengths_filename)
-
-        # document count is number of entries in the doc_lengths array
         index_instance.doc_count = index_instance.doc_lengths.shape[0]
 
-        # load the index using pickle
+        # Load term frequency matrix using scipy
+        index_instance.term_frequency_matrix = load_npz(term_frequency_filename)
+        index_instance.term_count = index_instance.term_frequency_matrix.shape[0]  # Number of unique terms
+
+        # Load metadata using pickle
         with open(index_filename, 'rb') as f:
             data = pickle.load(f)
-            index_instance.index = data['index']
-            index_instance.doc_count = data['doc_count']  # Ensure the document count is set
+            index_instance.term_to_id = data['index']
+            index_instance.doc_count = data['doc_count']
+            index_instance.term_count = data['term_count']
 
         print(f"Inverted index loaded from {index_filename}")
         print(f"Document lengths loaded from {lengths_filename}")
+        print(f"Term frequency matrix loaded from {term_frequency_filename}")
+
         return index_instance
-
-    def print_index(self):
-        """print inverted index."""
-        for term, (df, arr) in self.index.items():
-            print(f"Term: '{term}', Document Frequency: {df}, Entries: {arr.tolist()}")
-
-    def print_posting_list(self, term: str):
-        """print posting list for a given term"""
-        if term in self.index:
-            df, arr = self.index[term]
-            print(f"Posting list for term: '{term}'")
-            print(f"Document Frequency: {df}")
-            print("Postings (Document ID, Term Frequency):")
-            for entry in arr:
-                print(f"  Document ID: {entry['document_id']}, Term Frequency: {entry['term_frequency']}")
-        else:
-            print(f"Term: '{term}' not found in the index.")
-
-    def get_index_size_in_bytes(self) -> int:
-        """
-        Calculates the memory size of the inverted index in bytes, including a detailed breakdown.
-
-        :return: Total memory size of the inverted index in bytes.
-        """
-        size_doc_lengths = self.doc_lengths.nbytes
-        print(f'Total size of doc_lengths = {size_doc_lengths}')
-
-        # Calculate size of all numpy arrays in postings lists
-        size_inverted_index_numpy_arrays = 0
-        size_dict_entries = 0
-        size_term_keys = 0
-
-        # Create a list to hold all terms
-        all_terms = []
-
-        for term, (doc_freq, postings) in self.index.items():
-            size_inverted_index_numpy_arrays += postings.nbytes  # Posting list arrays
-            size_term_keys += sys.getsizeof(term)  # Memory size of each term (string)
-            size_dict_entries += sys.getsizeof((doc_freq, postings))  # Tuple size per entry
-
-            # Collect the term into the all_terms list
-            all_terms.append(term)
-
-        term_list_mem = 0
-        for t in all_terms:
-            term_list_mem += sys.getsizeof(t)
-        print(f'Total size of all terms array = {sys.getsizeof(all_terms)}')
-        print(f'Total size of all terms array = {term_list_mem}')
-
-        print(f'Total size of numpy arrays in postings lists = {size_inverted_index_numpy_arrays}')
-        print(f'Total size of all term keys (strings) = {size_term_keys}')
-        print(f'Total size of dictionary entries = {size_dict_entries}')
-        print(f'Total number of terms = {len(self.index)}')
-
-        total_index_size = (size_doc_lengths + size_inverted_index_numpy_arrays +
-                            size_term_keys + size_dict_entries)
-        print(f'Total index size = {total_index_size}')
-
-        return total_index_size
 
 
 class Indexer:
@@ -208,7 +147,9 @@ class Indexer:
         files = natsorted(os.listdir(directory))
         documents = [file for file in files if file.endswith(".txt")]
         nr_documents = len(documents)
-        inverted_index = InvertedIndex(nr_documents)
+
+        term_to_id = {}
+        term_counter = 0
 
         # Process each document and build the inverted index
         for i, document in enumerate(documents):
@@ -225,6 +166,20 @@ class Indexer:
             if self.save_tokenization:
                 self._save_tokenized_document(document_id, tokens)
 
+            for token in tokens:
+                if token not in term_to_id:
+                    term_to_id[token] = term_counter
+                    term_counter += 1
+
+            # status update
+            if (i + 1) % 10000 == 0:
+                print(f'Collected terms from {i + 1}/{nr_documents} documents...')
+
+        print(f'Initializing inverted index...')
+        inverted_index = InvertedIndex(term_counter, nr_documents, term_to_id)
+        for i, document in enumerate(documents):
+            document_id = extract_id_from_filename(document)
+            tokens = self._load_tokenized_document(document_id)
             inverted_index.add_document(document_id, tokens)
 
             # status update
@@ -232,6 +187,7 @@ class Indexer:
                 print(f'Processed {i + 1}/{nr_documents} documents...')
 
         print(f'Processed {nr_documents}/{nr_documents} documents...')
+        inverted_index.finalize_index()
         inverted_index.calculate_document_lengths()
         print(f'Calculated document vector lengths.')
         return inverted_index
@@ -253,51 +209,57 @@ class DocumentRanker:
         accumulators = Counter()  # hold accumulated score for every relevant document
 
         # loop over terms in query
-        for term, tf_idf_query in query_vector.items():
+        for term_id, tf_idf_query in query_vector.items():
             # calculate idf_weight
-            doc_freq, postings_list = self.inverted_index.index[term]
+            doc_freq = self.inverted_index.term_frequency_matrix[term_id, :].count_nonzero()
             idf_weight_doc = np.log(self.inverted_index.doc_count / doc_freq)
-            # loop over posting
-            for posting in postings_list:
-                doc_id = posting['document_id']
-                tf_doc = posting['term_frequency']
-                doc_length = self.inverted_index.doc_lengths[doc_id - 1]
 
-                # calculate tf_weight
-                tf_weight_doc = 1 + np.log(tf_doc)
+            # Get the term frequencies for the term across all documents
+            tf_doc = self.inverted_index.term_frequency_matrix[term_id, :].toarray().flatten()  # Convert to 1D array
+            doc_length = self.inverted_index.doc_lengths  # Document lengths array
 
-                # calculate tf_idf_weight
-                tf_idf_doc = (tf_weight_doc * idf_weight_doc) / doc_length
+            # Loop over all documents and calculate scores
+            for doc_id in range(len(tf_doc)):
+                tf_doc_value = tf_doc[doc_id]
+                if tf_doc_value > 0:  # Only consider documents that contain the term
+                    # Calculate tf_weight
+                    tf_weight_doc = 1 + np.log(tf_doc_value)
 
-                # update score for doc id
-                accumulators[doc_id] += tf_idf_doc * tf_idf_query
+                    # Calculate tf_idf_weight
+                    tf_idf_doc = (tf_weight_doc * idf_weight_doc) / doc_length[doc_id]
 
-        # sort the documents by score (descending)
+                    # Update score for doc id
+                    accumulators[doc_id] += tf_idf_doc * tf_idf_query
+
+        # Sort the documents by score (descending)
         sorted_doc_scores = accumulators.most_common()  # sorted [(doc_id, score), ...]
         return sorted_doc_scores
 
-    def get_query_vector(self, query) -> Dict[str, float]:
+    def get_query_vector(self, query) -> Dict[int, float]:
         query_tokens = self.tokenizer.tokenize(query)
         term_frequencies = Counter(query_tokens)
         sum_of_tf_idf_squared = 0
         query_vector = {}
 
         for query_token in term_frequencies.keys():
-            if query_token in self.inverted_index.index.keys():
+            if query_token in self.inverted_index.term_to_id.keys():
                 tf_weight = 1 + np.log(term_frequencies[query_token])
-                idf_weight = np.log(self.inverted_index.doc_count / self.inverted_index.index[query_token][0])
+
+                term_id = self.inverted_index.term_to_id[query_token]
+                doc_freq = self.inverted_index.term_frequency_matrix[term_id, :].count_nonzero()
+                idf_weight = np.log(self.inverted_index.doc_count / doc_freq)
 
                 # calculate tf_idf_weight
                 tf_idf_weight = tf_weight * idf_weight
-                query_vector[query_token] = tf_idf_weight
+                query_vector[term_id] = tf_idf_weight
 
                 # sum the squares of tf-idf weights
                 sum_of_tf_idf_squared += tf_idf_weight ** 2
         query_vector_length = np.sqrt(sum_of_tf_idf_squared)
         # normalize query vector
         if query_vector_length > 0:
-            for term in query_vector:
-                query_vector[term] /= query_vector_length
+            for term_id in query_vector:
+                query_vector[term_id] /= query_vector_length
         return query_vector
 
     def rank_queries_from_file(self, input_file: str, output_file: str, delimiter: str = ',',
