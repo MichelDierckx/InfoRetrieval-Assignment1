@@ -77,6 +77,7 @@ class InvertedIndex:
         save_npz(term_frequency_filename, self.term_frequency_matrix)
         print(f"Term frequency matrix saved to {term_frequency_filename}")
 
+        self.save_index(term_frequency_filename)
         # Save metadata using pickle
         with open(index_filename, 'wb') as f:
             pickle.dump({
@@ -85,6 +86,10 @@ class InvertedIndex:
                 'term_count': self.term_count
             }, f)
         print(f"Inverted index saved to {index_filename}")
+
+    def save_index(self, term_frequency_filename):
+        # Save term frequency matrix using scipy
+        save_npz(term_frequency_filename, self.term_frequency_matrix)
 
     @classmethod
     def load(cls, index_filename: str, lengths_filename: str, term_frequency_filename: str):
@@ -111,6 +116,29 @@ class InvertedIndex:
         print(f"Document lengths loaded from {lengths_filename}")
         print(f"Term frequency matrix loaded from {term_frequency_filename}")
 
+        return index_instance
+
+    @classmethod
+    def load_from_partial(cls, partial_index_directory: str, doc_count: int, term_count: int,
+                          term_to_id: Dict[int, str]):
+        # List all .npz files in the specified directory
+        index_instance = cls(0, 0, {})
+        index_instance.doc_count = doc_count
+        index_instance.term_count = term_count
+        index_instance.term_to_id = term_to_id
+        # index_instance.term_frequency_matrix = csr_matrix((1, 1), dtype=np.int16)
+        # index_instance.term_frequency_matrix.tocsr()
+
+        csr_files = [f for f in os.listdir(partial_index_directory) if f.endswith('.npz')]
+        nr_csr_files = len(csr_files)
+
+        index_instance.term_frequency_matrix = load_npz(os.path.join(partial_index_directory, csr_files[0]))
+
+        for i, csr_file in enumerate(csr_files[1:]):
+            crs_matrix = load_npz(os.path.join(partial_index_directory, csr_files[i + 1]))
+            index_instance.term_frequency_matrix = index_instance.term_frequency_matrix + crs_matrix
+            if (i + 1) % 500 == 0:
+                print(f'Merged {i + 1}/{nr_csr_files} partial indexes...')
         return index_instance
 
 
@@ -140,7 +168,8 @@ class Indexer:
                 return pickle.load(f)  # Use pickle to deserialize tokens
         return None
 
-    def create_index_from_directory(self, directory: str) -> InvertedIndex:
+    def create_index_from_directory(self, directory: str, partial_index_directory: str,
+                                    batch_size: int = 1000) -> InvertedIndex:
         print(f'Creating positional index for directory: {directory}')
 
         # List all text files in the directory (sorted alphabetically)
@@ -175,21 +204,25 @@ class Indexer:
             if (i + 1) % 10000 == 0:
                 print(f'Collected terms from {i + 1}/{nr_documents} documents...')
 
-        print(f'Initializing inverted index...')
-        inverted_index = InvertedIndex(term_counter, nr_documents, term_to_id)
-        for i, document in enumerate(documents):
-            document_id = extract_id_from_filename(document)
-            tokens = self._load_tokenized_document(document_id)
-            inverted_index.add_document(document_id, tokens)
+        print(f'Creating partial indexes...')
+        # Process each document and build the inverted index in batches
+        for i in range(0, nr_documents, batch_size):
+            partial_inverted_index = InvertedIndex(term_counter, nr_documents, term_to_id)
+            for j in range(i, min(i + batch_size, nr_documents)):
+                document = documents[j]
+                document_id = extract_id_from_filename(document)
+                tokens = self._load_tokenized_document(document_id)
+                partial_inverted_index.add_document(document_id, tokens)
+                # status update
+                if (j + 1) % 10000 == 0:
+                    print(f'Processed {j + 1}/{nr_documents} documents...')
+            partial_inverted_index.finalize_index()
+            partial_inverted_index.save_index(f'{partial_index_directory}/{i}.npz')
 
-            # status update
-            if (i + 1) % 10000 == 0:
-                print(f'Processed {i + 1}/{nr_documents} documents...')
-
-        print(f'Processed {nr_documents}/{nr_documents} documents...')
-        inverted_index.finalize_index()
+        inverted_index = InvertedIndex.load_from_partial(partial_index_directory, nr_documents, term_counter,
+                                                         term_to_id)
+        print(f'Calculating document vector lengths...')
         inverted_index.calculate_document_lengths()
-        print(f'Calculated document vector lengths.')
         return inverted_index
 
 
@@ -229,7 +262,7 @@ class DocumentRanker:
                     tf_idf_doc = (tf_weight_doc * idf_weight_doc) / doc_length[doc_id]
 
                     # Update score for doc id
-                    accumulators[doc_id] += tf_idf_doc * tf_idf_query
+                    accumulators[doc_id + 1] += tf_idf_doc * tf_idf_query
 
         # Sort the documents by score (descending)
         sorted_doc_scores = accumulators.most_common()  # sorted [(doc_id, score), ...]

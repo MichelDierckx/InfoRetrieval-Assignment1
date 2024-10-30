@@ -40,10 +40,11 @@ DEV_QUERIES_SMALL_RANKING = "dev_queries_small_ranking.csv"
 QUERIES_RANKING = "queries_rankings.csv"
 
 # Flags
+BATCH_SIZE = 2000
 SAVE_TOKENIZED_DOCUMENTS = False
 LOAD_TOKENIZED_DOCUMENTS = True
 DEV = True
-SIZE = "SMALL"  # Either FULL or SMALL
+SIZE = "FULL"  # Either FULL or SMALL
 
 
 def main():
@@ -52,6 +53,7 @@ def main():
         if SIZE == "SMALL":
             documents_dir = f'{DIRECTORY_DOCUMENTS}/{FULL_DOCS_SMALL}'
             index_file = f'{DIRECTORY_INDEX}/{FULL_DOCS_SMALL}/{DEFAULT_INDEX_FILE_NAME}'
+            partial_index_directory = f'{DIRECTORY_INDEX}/{FULL_DOCS_SMALL}/partial'
             doc_lengths_file = f'{DIRECTORY_INDEX}/{FULL_DOCS_SMALL}/{DEFAULT_DOC_LENGTHS_FILE_NAME}'
             term_frequency_file = f'{DIRECTORY_INDEX}/{FULL_DOCS_SMALL}/{DEFAULT_TERM_FREQUENCY_MATRIX_FILE_NAME}'  # New line
             token_cache_dir = f'{DIRECTORY_TOKENIZED_DOCUMENTS}/{FULL_DOCS_SMALL}'
@@ -62,6 +64,7 @@ def main():
         elif SIZE == "FULL":
             documents_dir = f'{DIRECTORY_DOCUMENTS}/{FULL_DOCS}'
             index_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_INDEX_FILE_NAME}'
+            partial_index_directory = f'{DIRECTORY_INDEX}/{FULL_DOCS}/partial'
             doc_lengths_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_DOC_LENGTHS_FILE_NAME}'
             term_frequency_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_TERM_FREQUENCY_MATRIX_FILE_NAME}'  # New line
             token_cache_dir = f'{DIRECTORY_TOKENIZED_DOCUMENTS}/{FULL_DOCS}'
@@ -75,6 +78,7 @@ def main():
     else:
         documents_dir = f'{DIRECTORY_DOCUMENTS}/{FULL_DOCS}'
         index_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_INDEX_FILE_NAME}'
+        partial_index_directory = f'{DIRECTORY_INDEX}/{FULL_DOCS}/partial'
         doc_lengths_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_DOC_LENGTHS_FILE_NAME}'
         term_frequency_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_TERM_FREQUENCY_MATRIX_FILE_NAME}'  # New line
         token_cache_dir = f'{DIRECTORY_TOKENIZED_DOCUMENTS}/{FULL_DOCS}'
@@ -98,7 +102,9 @@ def main():
                       load_tokenization=LOAD_TOKENIZED_DOCUMENTS, token_cache_directory=token_cache_dir)
 
     # Let indexer create inverted index from the specified documents directory
-    inverted_index = indexer.create_index_from_directory(directory=documents_dir)
+    inverted_index = indexer.create_index_from_directory(directory=documents_dir,
+                                                         partial_index_directory=partial_index_directory,
+                                                         batch_size=BATCH_SIZE)
 
     # Save the inverted index and document lengths to files
     inverted_index.save(index_filename=index_file,
