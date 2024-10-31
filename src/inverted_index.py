@@ -307,6 +307,7 @@ class DocumentRanker:
         """
         queries_df = pd.read_csv(input_file, delimiter=delimiter)
         with open(output_file, 'w') as f:
+            f.write("Query_number,doc_number\n")
             # loop over queries
             for i, (_, row) in enumerate(queries_df.iterrows()):
                 query_number = row['Query number']
