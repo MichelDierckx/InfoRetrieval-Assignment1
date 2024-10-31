@@ -3,6 +3,7 @@ import io
 import pstats
 
 from inverted_index import Indexer, DocumentRanker
+from src.inverted_index import InvertedIndex
 from tokenizer import Tokenizer
 
 # Document collections
@@ -43,6 +44,8 @@ QUERIES_RANKING = "queries_rankings.csv"
 BATCH_SIZE = 2000
 SAVE_TOKENIZED_DOCUMENTS = False
 LOAD_TOKENIZED_DOCUMENTS = True
+LOAD_INDEX = True
+
 DEV = True
 SIZE = "FULL"  # Either FULL or SMALL
 
@@ -60,7 +63,6 @@ def main():
             queries_file = f'{DIRECTORY_QUERIES}/{DEV_QUERIES_SMALL[0]}'
             queries_file_delimiter = DEV_QUERIES_SMALL[1]
             queries_ranking = f'{DIRECTORY_RANKINGS}/{DEV_QUERIES_SMALL_RANKING}'
-            k = 1  # All relevant ranked documents are returned
         elif SIZE == "FULL":
             documents_dir = f'{DIRECTORY_DOCUMENTS}/{FULL_DOCS}'
             index_file = f'{DIRECTORY_INDEX}/{FULL_DOCS}/{DEFAULT_INDEX_FILE_NAME}'
@@ -71,7 +73,6 @@ def main():
             queries_file = f'{DIRECTORY_QUERIES}/{DEV_QUERIES[0]}'
             queries_file_delimiter = DEV_QUERIES[1]
             queries_ranking = f'{DIRECTORY_RANKINGS}/{DEV_QUERIES_RANKING}'
-            k = None
         else:
             print(f'Size {SIZE} should be SMALL or FULL')
             return
@@ -85,7 +86,6 @@ def main():
         queries_file = f'{DIRECTORY_QUERIES}/{QUERIES[0]}'
         queries_file_delimiter = QUERIES[1]
         queries_ranking = f'{DIRECTORY_RANKINGS}/{QUERIES_RANKING}'
-        k = 10  # Top k ranked documents are returned
 
     # Create a StringIO buffer to capture the profiling results
     profile_buffer = io.StringIO()
@@ -97,22 +97,25 @@ def main():
     # Init tokenizer object
     tokenizer = Tokenizer()
 
-    # Init indexer, used to create inverted index
-    indexer = Indexer(tokenizer=tokenizer, save_tokenization=SAVE_TOKENIZED_DOCUMENTS,
-                      load_tokenization=LOAD_TOKENIZED_DOCUMENTS, token_cache_directory=token_cache_dir)
+    if not LOAD_INDEX:
 
-    # Let indexer create inverted index from the specified documents directory
-    inverted_index = indexer.create_index_from_directory(directory=documents_dir,
-                                                         partial_index_directory=partial_index_directory,
-                                                         batch_size=BATCH_SIZE)
+        # Init indexer, used to create inverted index
+        indexer = Indexer(tokenizer=tokenizer, save_tokenization=SAVE_TOKENIZED_DOCUMENTS,
+                          load_tokenization=LOAD_TOKENIZED_DOCUMENTS, token_cache_directory=token_cache_dir)
 
-    # Save the inverted index and document lengths to files
-    inverted_index.save(index_filename=index_file,
-                        lengths_filename=doc_lengths_file,
-                        term_frequency_filename=term_frequency_file)  # Updated to include term frequency file
+        # Let indexer create inverted index from the specified documents directory
+        inverted_index = indexer.create_index_from_directory(directory=documents_dir,
+                                                             partial_index_directory=partial_index_directory,
+                                                             batch_size=BATCH_SIZE)
 
-    inverted_index.load(index_filename=index_file, lengths_filename=doc_lengths_file,
-                        term_frequency_filename=term_frequency_file)
+        # Save the inverted index and document lengths to files
+        inverted_index.save(index_filename=index_file,
+                            lengths_filename=doc_lengths_file,
+                            term_frequency_filename=term_frequency_file)  # Updated to include term frequency file
+
+    else:
+        inverted_index = InvertedIndex.load(index_filename=index_file, lengths_filename=doc_lengths_file,
+                                            term_frequency_filename=term_frequency_file)
 
     document_ranker = DocumentRanker(tokenizer=tokenizer, inverted_index=inverted_index)
 
