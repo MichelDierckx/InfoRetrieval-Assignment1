@@ -2,8 +2,7 @@ import cProfile
 import io
 import pstats
 
-from inverted_index import Indexer, DocumentRanker
-from src.inverted_index import InvertedIndex
+from inverted_index import Indexer, DocumentRanker, InvertedIndex
 from tokenizer import Tokenizer
 
 # Document collections
@@ -47,7 +46,7 @@ LOAD_TOKENIZED_DOCUMENTS = True
 LOAD_INDEX = True
 
 DEV = True
-SIZE = "FULL"  # Either FULL or SMALL
+SIZE = "SMALL"  # Either FULL or SMALL
 
 k=10
 
