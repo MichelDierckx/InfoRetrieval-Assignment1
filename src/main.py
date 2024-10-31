@@ -49,6 +49,8 @@ LOAD_INDEX = True
 DEV = True
 SIZE = "FULL"  # Either FULL or SMALL
 
+k=10
+
 
 def main():
     """ Main program """
