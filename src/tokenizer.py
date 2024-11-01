@@ -7,8 +7,6 @@ from typing import List
 
 import nltk
 
-from custom_types import Token
-
 
 class Tokenizer:
     def __init__(self):
@@ -27,7 +25,7 @@ class Tokenizer:
         # change directories where nltk will look to src/nltk_data
         nltk.data.path = [nltk_data_dir]
 
-    def tokenize(self, text: str) -> List[Token]:
+    def tokenize(self, text: str) -> List[str]:
         """
         Tokenize the input text.
         :param text: input text
