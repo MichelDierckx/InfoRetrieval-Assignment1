@@ -1,6 +1,6 @@
-import os
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 def evaluate(result_file: str, expected_result_file: str, k: int):
     result = pd.read_csv(result_file)
@@ -18,6 +18,7 @@ def evaluate(result_file: str, expected_result_file: str, k: int):
     evaluate_precision(expected_dict, result_dict, k)
     evaluate_recall(expected_dict, result_dict, k)
 
+
 def evaluate_precision(result_dict: dict, expected_dict: dict, k: int):
     precision_list = []
     for key in result_dict.keys():
@@ -25,7 +26,7 @@ def evaluate_precision(result_dict: dict, expected_dict: dict, k: int):
         if key in expected_dict.keys():
             for i in range(1, min(k, len(expected_dict[key])) + 1):
                 relevant_docs = get_amount_of_relevant_docs(result_dict, expected_dict, key, i)
-                relevant.append(relevant_docs/i)
+                relevant.append(relevant_docs / i)
             precision_list.append(np.mean(relevant))
         else:
             precision_list.append(0)
@@ -34,12 +35,14 @@ def evaluate_precision(result_dict: dict, expected_dict: dict, k: int):
         print(f'Mean average precision at {k}: {result}')
     else:
         print(f'Mean average precision at {k}: 0')
+
+
 def evaluate_recall(result_dict: dict, expected_dict: dict, k: int):
     recall_list = []
     for key in result_dict.keys():
         if key in expected_dict.keys():
             relevant_docs = get_amount_of_relevant_docs(result_dict, expected_dict, key, k)
-            recall_list.append(relevant_docs/len(expected_dict[key]))
+            recall_list.append(relevant_docs / len(expected_dict[key]))
         else:
             recall_list.append(0)
     if len(recall_list) != 0:
@@ -47,7 +50,9 @@ def evaluate_recall(result_dict: dict, expected_dict: dict, k: int):
         print(f'Mean average recall at {k}: {result}')
     else:
         print(f'Mean average recall at {k}: 0')
-def get_amount_of_relevant_docs(result_dict: dict, expected_dict: dict, key: str, k:int):
+
+
+def get_amount_of_relevant_docs(result_dict: dict, expected_dict: dict, key: str, k: int):
     expected_list = expected_dict[key]
     relevant_docs = 0
     for i in range(min(k, len(result_dict[key]))):
@@ -60,4 +65,3 @@ def get_amount_of_relevant_docs(result_dict: dict, expected_dict: dict, key: str
 if __name__ == "__main__":
     path = "results/rankings/"
     evaluate(path + "dev_queries_ranking.csv", path + "dev_query_results.csv", 5)
-

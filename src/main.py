@@ -2,9 +2,9 @@ import cProfile
 import io
 import pstats
 
+from evaluate import evaluate
 from inverted_index import Indexer, DocumentRanker, InvertedIndex
 from tokenizer import Tokenizer
-from evaluate import evaluate
 
 # Document collections
 FULL_DOCS_SMALL = "full_docs_small"
