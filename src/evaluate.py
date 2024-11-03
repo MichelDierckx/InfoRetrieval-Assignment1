@@ -22,19 +22,30 @@ def evaluate(result_file: str, expected_result_file: str, k: int):
 def evaluate_precision(result_dict: dict, expected_dict: dict, k: int):
     precision_list = []
     for key in result_dict.keys():
-        relevant = []
+        relevant_precisions = []
+        relevant_docs_count = 0
+
         if key in expected_dict.keys():
-            for i in range(1, min(k, len(expected_dict[key])) + 1):
-                relevant_docs = get_amount_of_relevant_docs(result_dict, expected_dict, key, i)
-                relevant.append(relevant_docs / i)
-            precision_list.append(np.mean(relevant))
+            # calculate precision only in the top k
+            for i, doc_id in enumerate(result_dict[key][:k]):
+                if doc_id in expected_dict[key]:  # calculate precision only if the document is relevant
+                    relevant_docs_count += 1
+                    relevant_precisions.append(relevant_docs_count / (i + 1))
+
+            # average precision for query
+            if relevant_precisions:
+                precision_list.append(np.mean(relevant_precisions))
+            else:
+                precision_list.append(0)
         else:
             precision_list.append(0)
-    if len(precision_list) != 0:
+
+    # mean average precision
+    if precision_list:
         result = np.mean(precision_list)
-        print(f'Mean average precision at {k}: {result}')
+        print(f'Mean Average Precision at {k}: {result}')
     else:
-        print(f'Mean average precision at {k}: 0')
+        print(f'Mean Average Precision at {k}: 0')
 
 
 def evaluate_recall(result_dict: dict, expected_dict: dict, k: int):
@@ -64,4 +75,9 @@ def get_amount_of_relevant_docs(result_dict: dict, expected_dict: dict, key: str
 
 if __name__ == "__main__":
     path = "results/rankings/"
-    evaluate(path + "dev_queries_ranking.csv", path + "dev_query_results.csv", 5)
+    print(f'Large dataset:')
+    evaluate(path + "dev_queries_ranking.csv", path + "dev_query_results.csv", 3)
+    evaluate(path + "dev_queries_ranking.csv", path + "dev_query_results.csv", 10)
+    print(f'Small dataset:')
+    evaluate(path + "dev_queries_small_ranking.csv", path + "dev_query_results_small.csv", 3)
+    evaluate(path + "dev_queries_small_ranking.csv", path + "dev_query_results_small.csv", 10)
